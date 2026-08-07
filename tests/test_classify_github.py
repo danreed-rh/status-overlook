@@ -70,6 +70,14 @@ def test_assignee_unresolved_threads_pending():
     assert "github_assignee_waiting_on_author" in r.reasons
 
 
+def test_assignee_threads_unknown_pending():
+    r = classify_github(
+        _pr(assignee_is_user=True, assignee_unresolved_threads=None)
+    )
+    assert r.action == ActionState.PENDING
+    assert "github_assignee_threads_unknown" in r.reasons
+
+
 def test_assignee_resolved_threads_actionable():
     r = classify_github(
         _pr(assignee_is_user=True, assignee_unresolved_threads=False)

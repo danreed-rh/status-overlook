@@ -33,7 +33,7 @@ def _section_items(store: TrackStore, action: str) -> list[TrackedItem]:
         items = [
             i
             for i in store.items.values()
-            if i.lifecycle == "done" or i.action == "done"
+            if i.action == "done"
         ]
     else:
         items = [

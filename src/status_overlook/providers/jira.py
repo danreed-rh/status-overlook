@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 
+from status_overlook.jira_ids import qa_field_to_jql, safe_jql_status
 from status_overlook.store import Candidate
 
 
@@ -78,23 +79,31 @@ def fetch_assigned_and_qa_issues(
     rows = _acli_search(jql_assignee, fields=fields, limit=limit)
 
     if qa_contact_field:
-        # customfield_10470 → cf[10470]
-        cf = qa_contact_field
-        if cf.startswith("customfield_"):
-            cf_num = cf.removeprefix("customfield_")
-            jql_cf = f"cf[{cf_num}]"
+        jql_cf = qa_field_to_jql(qa_contact_field)
+        if jql_cf is None:
+            print(
+                f"Skipping QA discovery: jira.qa_contact_field must be "
+                f"customfield_<digits> (got {qa_contact_field!r})"
+            )
         else:
-            jql_cf = cf
-        status_list = ", ".join(f'"{s}"' for s in testing_statuses)
-        jql_qa = (
-            f"{jql_cf} = currentUser() AND status in ({status_list}) "
-            "AND resolution = EMPTY"
-        )
-        try:
-            rows.extend(_acli_search(jql_qa, fields=fields, limit=limit))
-        except ProviderError:
-            # Field may be invalid on some sites — surface on doctor later; skip QA set
-            pass
+            safe_statuses = []
+            for s in testing_statuses:
+                cleaned = safe_jql_status(s)
+                if cleaned is None:
+                    print(f"Skipping unsafe testing status in JQL: {s!r}")
+                else:
+                    safe_statuses.append(cleaned)
+            if safe_statuses:
+                status_list = ", ".join(f'"{s}"' for s in safe_statuses)
+                jql_qa = (
+                    f"{jql_cf} = currentUser() AND status in ({status_list}) "
+                    "AND resolution = EMPTY"
+                )
+                try:
+                    rows.extend(_acli_search(jql_qa, fields=fields, limit=limit))
+                except ProviderError as exc:
+                    # Unknown field on some sites — warn; Phase 4 doctor can harden
+                    print(f"QA discovery skipped: {exc}")
 
     by_id: dict[str, Candidate] = {}
     for row in rows:

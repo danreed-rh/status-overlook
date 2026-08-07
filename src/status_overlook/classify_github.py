@@ -75,11 +75,17 @@ def classify_github(
 
     # Assignee reviewer path (not the PR author)
     if pr.assignee_is_user and not pr.author_is_user:
-        if pr.assignee_unresolved_threads:
+        if pr.assignee_unresolved_threads is True:
             return ClassificationResult(
                 lifecycle=Lifecycle.ACTIVE,
                 action=ActionState.PENDING,
                 reasons=("github_assignee_waiting_on_author",),
+            )
+        if pr.assignee_unresolved_threads is None:
+            return ClassificationResult(
+                lifecycle=Lifecycle.ACTIVE,
+                action=ActionState.PENDING,
+                reasons=("github_assignee_threads_unknown",),
             )
         if pr.user_gave_lgtm:
             return ClassificationResult(

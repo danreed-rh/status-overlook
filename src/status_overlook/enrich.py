@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from status_overlook.classify_github import classify_github
 from status_overlook.classify_jira import classify_jira, is_jira_blocked
 from status_overlook.config import AppConfig
+from status_overlook.jira_ids import is_jira_key
 from status_overlook.models import ActionState, ClassifyConfig, GitHubPrSnapshot, JiraIssueSnapshot
 from status_overlook.store import TrackStore, TrackedItem, _iso, _utcnow
 
@@ -155,15 +156,15 @@ def github_remote_status(snap: GitHubPrSnapshot) -> str:
         status = f"{status}+ci_fail"
     if snap.has_unresolved_reviews:
         status = f"{status}+changes_requested"
-    if snap.assignee_unresolved_threads:
+    if snap.assignee_unresolved_threads is True:
         status = f"{status}+awaiting_author"
     return status
 
 
 def assignee_has_unresolved_review_threads(
     repo: str, number: int, me: str
-) -> bool:
-    """True if ``me`` started any inline review thread that is still unresolved."""
+) -> bool | None:
+    """True if ``me`` started unresolved threads; False if none; None if probe failed."""
     if "/" not in repo:
         return False
     owner, name = repo.split("/", 1)
@@ -194,18 +195,17 @@ def assignee_has_unresolved_review_threads(
         check=False,
     )
     if proc.returncode != 0:
-        return False
+        return None
     try:
         payload = json.loads(proc.stdout or "{}")
     except json.JSONDecodeError:
-        return False
-    nodes = (
-        ((payload.get("data") or {}).get("repository") or {})
-        .get("pullRequest", {})
-        .get("reviewThreads", {})
-        .get("nodes")
-        or []
-    )
+        return None
+    if payload.get("errors"):
+        return None
+    pr = ((payload.get("data") or {}).get("repository") or {}).get("pullRequest")
+    if pr is None:
+        return None
+    nodes = (pr.get("reviewThreads") or {}).get("nodes") or []
     me_cf = me.casefold()
     for thread in nodes:
         if thread.get("isResolved"):
@@ -242,7 +242,8 @@ def enrich_github_pr(
             "statusCheckRollup,title,url,comments,reviews",
         ]
     )
-    assert isinstance(data, dict)
+    if not isinstance(data, dict):
+        raise RuntimeError(f"gh pr view returned non-object JSON for {item.key}")
     author = ((data.get("author") or {}).get("login") or "").casefold()
     assignees = {
         (a.get("login") or "").casefold() for a in (data.get("assignees") or [])
@@ -254,7 +255,7 @@ def enrich_github_pr(
         str(data.get("state") or "open"), data.get("mergedAt")
     )
     assignee_is_user = me in assignees
-    unresolved_threads = False
+    unresolved_threads: bool | None = False
     if assignee_is_user and author != me:
         unresolved_threads = assignee_has_unresolved_review_threads(
             repo, int(data.get("number") or num_s), me
@@ -305,8 +306,15 @@ def _status_is_terminal(status_obj: object, cfg: ClassifyConfig) -> bool:
     return cfg.status_in(name, cfg.status_done)
 
 
-def epic_children_all_done(epic_key: str, cfg: ClassifyConfig) -> bool:
-    """True when epic has no open children (zero children counts as all done)."""
+def epic_children_all_done(epic_key: str, cfg: ClassifyConfig) -> bool | None:
+    """True when all children terminal; False if any open; None if unknown/truncated.
+
+    Zero children counts as all done. If the search returns exactly the page
+    limit, treat as unknown (fail closed) instead of assuming all done.
+    """
+    if not is_jira_key(epic_key):
+        raise ValueError(f"invalid jira key: {epic_key}")
+    limit = 100
     jql = f'parent = {epic_key} OR "Epic Link" = {epic_key}'
     cmd = [
         "acli",
@@ -318,7 +326,7 @@ def epic_children_all_done(epic_key: str, cfg: ClassifyConfig) -> bool:
         "--fields",
         "key,status",
         "--limit",
-        "100",
+        str(limit),
         "--json",
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -326,7 +334,9 @@ def epic_children_all_done(epic_key: str, cfg: ClassifyConfig) -> bool:
         raise RuntimeError((proc.stderr or proc.stdout or "acli epic children failed").strip())
     rows = json.loads(proc.stdout or "[]")
     if not isinstance(rows, list):
-        return False
+        return None
+    if len(rows) >= limit:
+        return None
     for row in rows:
         fields = row.get("fields") or {}
         if not _status_is_terminal(fields.get("status"), cfg):
@@ -374,13 +384,17 @@ def enrich_jira_issues(
     identity: Identity,
 ) -> dict[str, tuple[JiraIssueSnapshot, str, str]]:
     """Return key -> (snapshot, summary, url)."""
-    if not keys:
+    valid_keys = [k for k in keys if is_jira_key(k)]
+    skipped = sorted(set(keys) - set(valid_keys))
+    for bad in skipped:
+        print(f"Skipping invalid Jira key in store: {bad}")
+    if not valid_keys:
         return {}
     # Batch in chunks of 40
     out: dict[str, tuple[JiraIssueSnapshot, str, str]] = {}
     fields = _jira_fields_list(cfg)
-    for i in range(0, len(keys), 40):
-        chunk = keys[i : i + 40]
+    for i in range(0, len(valid_keys), 40):
+        chunk = valid_keys[i : i + 40]
         jql = "key in (" + ", ".join(chunk) + ")"
         cmd = [
             "acli",
@@ -406,6 +420,8 @@ def enrich_jira_issues(
         rows = json.loads(proc.stdout or "[]")
         for row in rows:
             key = str(row.get("key") or "")
+            if not is_jira_key(key):
+                continue
             f = row.get("fields") or {}
             status = ((f.get("status") or {}).get("name") or "")
             summary = str(f.get("summary") or "")
@@ -416,12 +432,14 @@ def enrich_jira_issues(
                 identity.jira_account_id and assignee_id == identity.jira_account_id
             )
             qa_is_user = False
-            if cfg.jira_qa_contact_field:
+            if cfg.jira_qa_contact_field and identity.jira_account_id:
                 qa = f.get(cfg.jira_qa_contact_field)
                 if isinstance(qa, dict):
-                    qa_is_user = str(qa.get("accountId") or "") == identity.jira_account_id
+                    qa_id = str(qa.get("accountId") or "")
+                    qa_is_user = bool(qa_id) and qa_id == identity.jira_account_id
                 elif isinstance(qa, list) and qa and isinstance(qa[0], dict):
-                    qa_is_user = str(qa[0].get("accountId") or "") == identity.jira_account_id
+                    qa_id = str(qa[0].get("accountId") or "")
+                    qa_is_user = bool(qa_id) and qa_id == identity.jira_account_id
             pr_link = None
             if cfg.jira_pr_link_field:
                 pr_link = _extract_pr_link(f.get(cfg.jira_pr_link_field))
@@ -448,7 +466,7 @@ def enrich_jira_issues(
         try:
             all_done = epic_children_all_done(key, classify_cfg)
         except RuntimeError:
-            all_done = False
+            all_done = None
         snap.epic_children_all_done = all_done
         out[key] = (snap, summary, url)
     return out
@@ -557,11 +575,12 @@ def enrich_and_classify_store(store: TrackStore, cfg: AppConfig) -> tuple[int, i
             changes += 1
 
     for item in gh_items:
-        classified += 1
         try:
             snap, title, url = enrich_github_pr(item, identity, cfg)
-        except RuntimeError:
+        except RuntimeError as exc:
+            print(f"Skipping GitHub enrich for {item.key}: {exc}")
             continue
+        classified += 1
         keys_in_title = set(_JIRA_KEY_RE.findall(title))
         linked_blocked = bool(keys_in_title & blocked_jira_keys)
         for key, (jsnap, _, _) in jira_map.items():

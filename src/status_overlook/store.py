@@ -197,6 +197,10 @@ def reconcile(
         existing.remote_status = cand.remote_status or existing.remote_status
         existing.last_seen_at = now_s
         existing.pinned = existing.pinned or cid in pin_ids
+        # IGNORE items stay done while still in discovery (e.g. Testing assignee-only)
+        if existing.lifecycle == "done" and existing.action == "ignore" and not existing.pinned:
+            stats.refreshed.append(cid)
+            continue
         if existing.lifecycle == "done":
             existing.lifecycle = "active"
             existing.finished_at = None

@@ -80,3 +80,31 @@ def test_digest_sections():
     assert "A-1" in md
     assert "## Blocked" in md
     assert "B-1" in md
+
+
+def test_digest_excludes_ignore_from_recently_done():
+    store = TrackStore(
+        items={
+            "jira:IGN-1": TrackedItem(
+                id="jira:IGN-1",
+                source="jira",
+                key="IGN-1",
+                lifecycle="done",
+                action="ignore",
+                summary="testing assignee only",
+                remote_status="Testing",
+            ),
+            "jira:DONE-1": TrackedItem(
+                id="jira:DONE-1",
+                source="jira",
+                key="DONE-1",
+                lifecycle="done",
+                action="done",
+                summary="closed",
+                remote_status="Closed",
+            ),
+        }
+    )
+    md = build_digest_markdown(store)
+    assert "DONE-1" in md
+    assert "IGN-1" not in md

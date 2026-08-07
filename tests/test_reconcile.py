@@ -67,3 +67,29 @@ def test_reconcile_prunes_old_done():
     store, stats = reconcile(store, [], now=now, retention_days=7)
     assert "jira:OLD-DONE" not in store.items
     assert "jira:OLD-DONE" in stats.pruned
+
+
+def test_reconcile_does_not_reactivate_ignore():
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    store = TrackStore(
+        items={
+            "jira:T-1": TrackedItem(
+                id="jira:T-1",
+                source="jira",
+                key="T-1",
+                lifecycle="done",
+                action="ignore",
+                finished_at="2026-08-07T10:00:00Z",
+                first_seen_at="2026-08-01T00:00:00Z",
+                last_seen_at="2026-08-07T10:00:00Z",
+            )
+        }
+    )
+    candidates = [
+        Candidate(source="jira", key="T-1", summary="testing only", remote_status="Testing"),
+    ]
+    store, stats = reconcile(store, candidates, now=now)
+    assert store.items["jira:T-1"].lifecycle == "done"
+    assert store.items["jira:T-1"].action == "ignore"
+    assert store.items["jira:T-1"].finished_at is not None
+    assert "jira:T-1" in stats.refreshed

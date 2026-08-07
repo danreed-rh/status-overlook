@@ -78,8 +78,9 @@ class GitHubPrSnapshot:
     ci_failed: bool = False
     # User (assignee/reviewer) posted /lgtm or applied an actionable label
     user_gave_lgtm: bool = False
-    # User started at least one inline review thread that is still unresolved
-    assignee_unresolved_threads: bool = False
+    # User started at least one inline review thread that is still unresolved.
+    # None = probe failed / unknown — classify fail-closed as pending.
+    assignee_unresolved_threads: bool | None = False
 
 
 @dataclass(frozen=True)

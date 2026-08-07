@@ -23,7 +23,9 @@
 | PR linked Jira blocked | **blocked** |
 | PR `lgtm` label | **actionable** for **author** (ready to merge); not for assignee-only |
 | PR assignee + user `/lgtm` comment or `lgtm` label | **pending** (`github_assignee_lgtm`) — signed off, waiting |
-| PR assignee + unresolved own review threads | **pending** (`github_assignee_waiting_on_author`); when resolved → **actionable** (`github_assignee_to_review`) |
+| PR assignee + unresolved own review threads | **pending** (`github_assignee_waiting_on_author`); probe failure → **pending** (`github_assignee_threads_unknown`); when resolved → **actionable** (`github_assignee_to_review`) |
+| Jira key / QA field hygiene | Keys must match `PROJ-123`; QA field must be `customfield_<digits>`; unsafe status chars rejected |
+| IGNORE vs reconcile | `action=ignore` stays `lifecycle=done` while still in discovery (no reactivate); omitted from Recently done |
 | PR assignee (not author) otherwise | **actionable** — needs review / re-review |
 | PR actionable labels | `lgtm` only (default) |
 | Blocked detection | **Any of:** status in `status_blocked` (default `Blocked`), label in `blocked_labels` (default `blocked`), or Jira **Flagged** impediment |
