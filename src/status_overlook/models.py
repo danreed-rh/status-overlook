@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 
 
@@ -20,12 +20,12 @@ class Lifecycle(str, Enum):
 
 
 class ActionState(str, Enum):
-    """What the digest should tell the user to do."""
+    """What the digest should tell the user about the item."""
 
     ACTIONABLE = "actionable"
     PENDING = "pending"
+    BLOCKED = "blocked"
     DONE = "done"
-    # Not shown as needing attention; still may be stored
     IGNORE = "ignore"
 
 
@@ -49,6 +49,7 @@ class JiraIssueSnapshot:
     status: str
     assignee_is_user: bool = False
     qa_contact_is_user: bool = False
+    # True when board "blocked" metric matches (Razzmatazz: Flagged / impediment)
     blocked: bool = False
     labels: tuple[str, ...] = ()
     pr_link: str | None = None
@@ -67,6 +68,9 @@ class GitHubPrSnapshot:
     assignee_is_user: bool = False
     labels: tuple[str, ...] = ()
     linked_jira_blocked: bool = False
+    # Provider-filled: CHANGES_REQUESTED / outstanding review requests, failing checks
+    has_unresolved_reviews: bool = False
+    ci_failed: bool = False
 
 
 @dataclass(frozen=True)
@@ -77,10 +81,10 @@ class ClassifyConfig:
     status_review: tuple[str, ...] = ("Review", "In Review", "Code Review")
     status_testing: tuple[str, ...] = ("Testing",)
     status_done: tuple[str, ...] = ("Resolved", "Closed", "Done")
-    # Extra status names treated as blocked (in addition to snapshot.blocked)
-    status_blocked: tuple[str, ...] = ("Blocked",)
-    actionable_labels: tuple[str, ...] = ("lgtm", "/lgtm")
-    # Case-insensitive label match
+    # Optional extra: treat these status names as blocked (in addition to snapshot.blocked)
+    status_blocked: tuple[str, ...] = ()
+    # Ready-to-merge style labels on open PRs
+    actionable_labels: tuple[str, ...] = ("lgtm",)
     label_match_case_insensitive: bool = True
 
     def status_in(self, status: str, group: tuple[str, ...]) -> bool:

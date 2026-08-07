@@ -8,7 +8,6 @@ github:
   login: ""
   actionable_labels:
     - lgtm
-    - /lgtm
 
 jira:
   site: ""

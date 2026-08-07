@@ -23,15 +23,12 @@ def classify_jira(
 ) -> ClassificationResult:
     """Classify a Jira issue for track lifecycle and action state.
 
-    Defaults (Gate 1 draft):
-    - Done statuses → lifecycle done
-    - Testing + QA contact → actionable (even if also assignee)
-    - Testing + assignee (not QA) → actionable
-    - Testing + neither → ignore (do not actively track for action)
+    - Done statuses → done
+    - Blocked (any non-done status) → blocked (not actionable/pending)
+    - Testing + QA contact → actionable
+    - Testing + assignee only → untracked (not actionable, not pending)
     - Review + assignee → pending
-    - Active status + assignee + not blocked → actionable
-    - Active/Review + assignee + blocked → pending
-    - Otherwise ignore
+    - Active + assignee → actionable
     """
     cfg = cfg or ClassifyConfig()
     blocked = _is_blocked(issue, cfg)
@@ -45,6 +42,16 @@ def classify_jira(
             blocked=blocked,
         )
 
+    # Blocked overrides action/pending for any remaining status
+    if blocked and (issue.assignee_is_user or issue.qa_contact_is_user):
+        reasons.append("jira_blocked")
+        return ClassificationResult(
+            lifecycle=Lifecycle.ACTIVE,
+            action=ActionState.BLOCKED,
+            reasons=tuple(reasons),
+            blocked=True,
+        )
+
     in_testing = cfg.status_in(issue.status, cfg.status_testing)
     in_review = cfg.status_in(issue.status, cfg.status_review)
     in_active = cfg.status_in(issue.status, cfg.status_active)
@@ -56,21 +63,21 @@ def classify_jira(
                 lifecycle=Lifecycle.ACTIVE,
                 action=ActionState.ACTIONABLE,
                 reasons=tuple(reasons),
-                blocked=blocked,
+                blocked=False,
             )
+        # Assignee-only in Testing: not actionable, not pending
         if issue.assignee_is_user:
-            reasons.append("jira_testing_assignee")
             return ClassificationResult(
-                lifecycle=Lifecycle.ACTIVE,
-                action=ActionState.ACTIONABLE,
-                reasons=tuple(reasons),
-                blocked=blocked,
+                lifecycle=Lifecycle.UNTRACKED,
+                action=ActionState.IGNORE,
+                reasons=("jira_testing_assignee_only",),
+                blocked=False,
             )
         return ClassificationResult(
             lifecycle=Lifecycle.UNTRACKED,
             action=ActionState.IGNORE,
             reasons=("jira_testing_not_involved",),
-            blocked=blocked,
+            blocked=False,
         )
 
     if not issue.assignee_is_user:
@@ -78,19 +85,8 @@ def classify_jira(
             lifecycle=Lifecycle.UNTRACKED,
             action=ActionState.IGNORE,
             reasons=("jira_not_assignee",),
-            blocked=blocked,
+            blocked=False,
         )
-
-    # Assignee from here
-    if blocked:
-        reasons.append("jira_blocked")
-        if in_review or in_active:
-            return ClassificationResult(
-                lifecycle=Lifecycle.ACTIVE,
-                action=ActionState.PENDING,
-                reasons=tuple(reasons),
-                blocked=True,
-            )
 
     if in_review:
         reasons.append("jira_in_review")
@@ -98,7 +94,7 @@ def classify_jira(
             lifecycle=Lifecycle.ACTIVE,
             action=ActionState.PENDING,
             reasons=tuple(reasons),
-            blocked=blocked,
+            blocked=False,
         )
 
     if in_active:
@@ -107,14 +103,13 @@ def classify_jira(
             lifecycle=Lifecycle.ACTIVE,
             action=ActionState.ACTIONABLE,
             reasons=tuple(reasons),
-            blocked=blocked,
+            blocked=False,
         )
 
-    # Unknown status but assigned — track as pending so it is not lost
     reasons.append("jira_unknown_status_assignee")
     return ClassificationResult(
         lifecycle=Lifecycle.ACTIVE,
         action=ActionState.PENDING,
         reasons=tuple(reasons),
-        blocked=blocked,
+        blocked=False,
     )

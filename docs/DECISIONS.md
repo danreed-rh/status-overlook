@@ -4,38 +4,31 @@
 
 | ID | Decision | Date |
 |----|----------|------|
-| D0 | Name: Status Overlook / `status-overlook` | 2026-08-07 |
-| D1 | Repo: https://github.com/danreed-rh/status-overlook | 2026-08-07 |
-| D2 | POC: `gh` + `acli` | 2026-08-07 |
-| D3 | License: Apache-2.0 (+ NOTICE) | 2026-08-07 |
-| D4 | Mac paths under `~/Library/...`; Linux XDG | 2026-08-07 |
-| D5 | User-level only; `paths` + uninstall planned | 2026-08-07 |
+| D0–D5 | Name, repo, gh+acli, Apache-2.0, Mac paths, uninstall | 2026-08-07 |
+| D1b | GitHub remote: https://github.com/danreed-rh/status-overlook | 2026-08-07 |
 
-## Phase 1 draft defaults (awaiting Gate 1)
+## Phase 1 classification (updated Gate 1)
 
-| Topic | Default |
-|-------|---------|
-| Testing + QA contact | actionable + track |
-| Testing + assignee only | actionable + track |
-| Testing + neither | untracked |
-| Review + assignee | pending |
-| Active + assignee + not blocked | actionable |
-| Active/Review + blocked | pending |
-| PR `/lgtm` or `lgtm` | actionable |
-| Linked Jira blocked | pending (overrides LGTM) |
-| Author draft PR | actionable |
-| Author open non-draft | pending |
-| Assignee open non-draft | actionable |
+| Topic | Rule |
+|-------|------|
+| Action states | `actionable` \| `pending` \| `blocked` \| `done` \| `ignore` |
+| Jira Testing + QA contact | actionable |
+| Jira Testing + assignee only | ignore (not actionable, not pending) |
+| Jira blocked (any non-done status) | **blocked** |
+| Jira Review + assignee | pending |
+| Jira active + assignee | actionable |
+| PR open + unresolved reviews or CI fail | actionable |
+| PR open + otherwise involved | pending |
+| PR linked Jira blocked | **blocked** |
+| PR actionable labels | `lgtm` only (default) |
+| Blocked detection (Razzmatazz) | **Awaiting confirm** — evidence points to Jira **Flagged** (impediment); see Gate 1 prompt |
 
 ## Open
 
 | ID | Question | Gate |
 |----|----------|------|
-| Q1 | Confirm Testing / QA rules above | 1 |
-| Q1b | Confirm `actionable_labels`: `lgtm`, `/lgtm` (case-insensitive) | 1 |
-| Q2 | How to set `blocked` from Jira (status vs Flagged vs label) — Phase 2 | 1–2 |
+| Q2 | Confirm blocked = Flagged (impediment) for Razzmatazz board 11803 | 1 |
 | Q3 | Done retention | 2 |
 | Q4 | Cross-link strategy | 3 |
 | Q5 | Schedule interval | 4 |
-| Q6 | Optional `ghd` | 5 |
 | Q7 | Final docs cleanup | 5 |

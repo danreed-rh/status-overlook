@@ -15,5 +15,5 @@ RHOAIENG_EXAMPLE = {
     "status_review": ["Review"],
     "status_testing": ["Testing"],
     "status_done": ["Resolved", "Closed", "Done"],
-    "actionable_labels": ["lgtm", "/lgtm"],
+    "actionable_labels": ["lgtm"],
 }
