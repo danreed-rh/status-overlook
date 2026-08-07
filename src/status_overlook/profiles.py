@@ -15,5 +15,8 @@ RHOAIENG_EXAMPLE = {
     "status_review": ["Review"],
     "status_testing": ["Testing"],
     "status_done": ["Resolved", "Closed", "Done"],
+    "status_blocked": ["Blocked"],
+    "blocked_labels": ["blocked"],
+    # Providers: flagged = Flagged impediment is not empty
     "actionable_labels": ["lgtm"],
 }

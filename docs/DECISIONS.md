@@ -21,13 +21,13 @@
 | PR open + otherwise involved | pending |
 | PR linked Jira blocked | **blocked** |
 | PR actionable labels | `lgtm` only (default) |
-| Blocked detection (Razzmatazz) | **Awaiting confirm** — evidence points to Jira **Flagged** (impediment); see Gate 1 prompt |
+| Blocked detection | **Any of:** status in `status_blocked` (default `Blocked`), label in `blocked_labels` (default `blocked`), or Jira **Flagged** impediment |
 
 ## Open
 
 | ID | Question | Gate |
 |----|----------|------|
-| Q2 | Confirm blocked = Flagged (impediment) for Razzmatazz board 11803 | 1 |
+| Q2 | Blocked detection | 1 | **Done:** status + `blocked` label + Flagged |
 | Q3 | Done retention | 2 |
 | Q4 | Cross-link strategy | 3 |
 | Q5 | Schedule interval | 4 |

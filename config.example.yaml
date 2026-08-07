@@ -11,9 +11,13 @@ github:
 
 jira:
   site: ""
-  # Custom field IDs only when your site needs them (QA contact, PR link, etc.)
   qa_contact_field: ""
   pr_link_field: ""
+  # Blocked if any match (providers set flagged from Jira Flagged/impediment)
+  status_blocked:
+    - Blocked
+  blocked_labels:
+    - blocked
 
 # Optional manual pins
 pins:

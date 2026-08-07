@@ -39,3 +39,11 @@ User-domain only — no `/Library` system agents in v1.
 | `remote_updated_at` | Upstream updated time |
 | `state_changed_at` | Last change to our derived state (not bumped on no-op runs) |
 | `last_read_at` | Last mark-read by you or an agent |
+
+## Jira blocked detection
+
+An issue is **blocked** if **any** of these is true:
+
+1. **Status** name is in `status_blocked` (default: `Blocked`)
+2. **Label** is in `blocked_labels` (default: `blocked`, case-insensitive)
+3. **Flagged** impediment is set (Jira Software flag; providers map this to `flagged: true`)

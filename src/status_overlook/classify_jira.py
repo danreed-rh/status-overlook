@@ -11,10 +11,16 @@ from status_overlook.models import (
 )
 
 
-def _is_blocked(issue: JiraIssueSnapshot, cfg: ClassifyConfig) -> bool:
-    if issue.blocked:
+def is_jira_blocked(issue: JiraIssueSnapshot, cfg: ClassifyConfig | None = None) -> bool:
+    """Blocked if status, label, or Flagged impediment matches (any one is enough)."""
+    cfg = cfg or ClassifyConfig()
+    if issue.flagged:
         return True
-    return cfg.status_in(issue.status, cfg.status_blocked)
+    if cfg.status_in(issue.status, cfg.status_blocked):
+        return True
+    if cfg.label_in(issue.labels, cfg.blocked_labels):
+        return True
+    return False
 
 
 def classify_jira(
@@ -24,14 +30,14 @@ def classify_jira(
     """Classify a Jira issue for track lifecycle and action state.
 
     - Done statuses → done
-    - Blocked (any non-done status) → blocked (not actionable/pending)
+    - Blocked (status / label / Flagged) at any non-done status → blocked
     - Testing + QA contact → actionable
     - Testing + assignee only → untracked (not actionable, not pending)
     - Review + assignee → pending
     - Active + assignee → actionable
     """
     cfg = cfg or ClassifyConfig()
-    blocked = _is_blocked(issue, cfg)
+    blocked = is_jira_blocked(issue, cfg)
     reasons: list[str] = []
 
     if cfg.status_in(issue.status, cfg.status_done):
@@ -44,11 +50,16 @@ def classify_jira(
 
     # Blocked overrides action/pending for any remaining status
     if blocked and (issue.assignee_is_user or issue.qa_contact_is_user):
-        reasons.append("jira_blocked")
+        if issue.flagged:
+            reasons.append("jira_flagged")
+        if cfg.status_in(issue.status, cfg.status_blocked):
+            reasons.append("jira_status_blocked")
+        if cfg.label_in(issue.labels, cfg.blocked_labels):
+            reasons.append("jira_label_blocked")
         return ClassificationResult(
             lifecycle=Lifecycle.ACTIVE,
             action=ActionState.BLOCKED,
-            reasons=tuple(reasons),
+            reasons=tuple(reasons) or ("jira_blocked",),
             blocked=True,
         )
 

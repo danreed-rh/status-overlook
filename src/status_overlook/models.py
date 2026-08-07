@@ -49,8 +49,8 @@ class JiraIssueSnapshot:
     status: str
     assignee_is_user: bool = False
     qa_contact_is_user: bool = False
-    # True when board "blocked" metric matches (Razzmatazz: Flagged / impediment)
-    blocked: bool = False
+    # Jira Software Flagged / impediment (board "blocked" flag)
+    flagged: bool = False
     labels: tuple[str, ...] = ()
     pr_link: str | None = None
 
@@ -81,11 +81,18 @@ class ClassifyConfig:
     status_review: tuple[str, ...] = ("Review", "In Review", "Code Review")
     status_testing: tuple[str, ...] = ("Testing",)
     status_done: tuple[str, ...] = ("Resolved", "Closed", "Done")
-    # Optional extra: treat these status names as blocked (in addition to snapshot.blocked)
-    status_blocked: tuple[str, ...] = ()
+    # Blocked if ANY of: status in this set, label in blocked_labels, or flagged=True
+    status_blocked: tuple[str, ...] = ("Blocked",)
+    blocked_labels: tuple[str, ...] = ("blocked",)
     # Ready-to-merge style labels on open PRs
     actionable_labels: tuple[str, ...] = ("lgtm",)
     label_match_case_insensitive: bool = True
 
     def status_in(self, status: str, group: tuple[str, ...]) -> bool:
         return status.casefold() in {s.casefold() for s in group}
+
+    def label_in(self, labels: tuple[str, ...], group: tuple[str, ...]) -> bool:
+        if self.label_match_case_insensitive:
+            have = {x.casefold() for x in labels}
+            return any(g.casefold() in have for g in group)
+        return any(g in labels for g in group)
