@@ -23,6 +23,10 @@ def is_jira_blocked(issue: JiraIssueSnapshot, cfg: ClassifyConfig | None = None)
     return False
 
 
+def _is_epic(issue: JiraIssueSnapshot) -> bool:
+    return issue.issue_type.casefold() == "epic"
+
+
 def classify_jira(
     issue: JiraIssueSnapshot,
     cfg: ClassifyConfig | None = None,
@@ -31,6 +35,7 @@ def classify_jira(
 
     - Done statuses → done
     - Blocked (status / label / Flagged) at any non-done status → blocked
+    - Epic + assignee: pending until all children are done; then actionable
     - Testing + QA contact → actionable
     - Testing + assignee only → untracked (not actionable, not pending)
     - Review + assignee → pending
@@ -61,6 +66,27 @@ def classify_jira(
             action=ActionState.BLOCKED,
             reasons=tuple(reasons) or ("jira_blocked",),
             blocked=True,
+        )
+
+    # Epics: roll up child lifecycle instead of normal active/review rules
+    if _is_epic(issue) and issue.assignee_is_user:
+        if issue.epic_children_all_done is True:
+            return ClassificationResult(
+                lifecycle=Lifecycle.ACTIVE,
+                action=ActionState.ACTIONABLE,
+                reasons=("jira_epic_children_done",),
+                blocked=False,
+            )
+        reason = (
+            "jira_epic_children_open"
+            if issue.epic_children_all_done is False
+            else "jira_epic_children_unknown"
+        )
+        return ClassificationResult(
+            lifecycle=Lifecycle.ACTIVE,
+            action=ActionState.PENDING,
+            reasons=(reason,),
+            blocked=False,
         )
 
     in_testing = cfg.status_in(issue.status, cfg.status_testing)

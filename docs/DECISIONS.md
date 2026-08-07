@@ -17,6 +17,7 @@
 | Jira blocked (any non-done status) | **blocked** |
 | Jira Review + assignee | pending |
 | Jira active + assignee | actionable |
+| Jira **Epic** + assignee | **pending** until all children are terminal (status category `done`, or names in `status_done`); then **actionable**. Zero children ⇒ all done. |
 | PR open + unresolved reviews or CI fail | actionable |
 | PR open + otherwise involved | pending |
 | PR linked Jira blocked | **blocked** |

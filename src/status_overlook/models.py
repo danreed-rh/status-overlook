@@ -53,6 +53,11 @@ class JiraIssueSnapshot:
     flagged: bool = False
     labels: tuple[str, ...] = ()
     pr_link: str | None = None
+    # Issue type name (e.g. Epic, Story). Case-insensitive Epic check in classify.
+    issue_type: str = ""
+    # For Epics only: True when every child is done/resolved/closed.
+    # None = not an epic, or children not fetched yet (treat as not-all-done).
+    epic_children_all_done: bool | None = None
 
 
 @dataclass

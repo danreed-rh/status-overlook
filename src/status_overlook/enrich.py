@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from status_overlook.classify_github import classify_github
 from status_overlook.classify_jira import classify_jira, is_jira_blocked
 from status_overlook.config import AppConfig
-from status_overlook.models import ActionState, GitHubPrSnapshot, JiraIssueSnapshot
+from status_overlook.models import ActionState, ClassifyConfig, GitHubPrSnapshot, JiraIssueSnapshot
 from status_overlook.store import TrackStore, TrackedItem, _iso, _utcnow
 
 _JIRA_KEY_RE = re.compile(r"\b([A-Z][A-Z0-9]+-\d+)\b")
@@ -170,7 +170,7 @@ def enrich_github_pr(
 
 
 def _jira_fields_list(cfg: AppConfig) -> str:
-    fields = ["key", "summary", "status", "assignee", "labels"]
+    fields = ["key", "summary", "status", "assignee", "labels", "issuetype"]
     if cfg.jira_qa_contact_field:
         fields.append(cfg.jira_qa_contact_field)
     if cfg.jira_pr_link_field:
@@ -178,6 +178,46 @@ def _jira_fields_list(cfg: AppConfig) -> str:
     # Best-effort Flagged; ignore if acli rejects later
     fields.append("flagged")
     return ",".join(fields)
+
+
+def _status_is_terminal(status_obj: object, cfg: ClassifyConfig) -> bool:
+    """True if child is at end of lifecycle (category done, or name in status_done)."""
+    if not isinstance(status_obj, dict):
+        return cfg.status_in(str(status_obj or ""), cfg.status_done)
+    category = status_obj.get("statusCategory") or {}
+    if isinstance(category, dict) and str(category.get("key") or "").casefold() == "done":
+        return True
+    name = str(status_obj.get("name") or "")
+    return cfg.status_in(name, cfg.status_done)
+
+
+def epic_children_all_done(epic_key: str, cfg: ClassifyConfig) -> bool:
+    """True when epic has no open children (zero children counts as all done)."""
+    jql = f'parent = {epic_key} OR "Epic Link" = {epic_key}'
+    cmd = [
+        "acli",
+        "jira",
+        "workitem",
+        "search",
+        "--jql",
+        jql,
+        "--fields",
+        "key,status",
+        "--limit",
+        "100",
+        "--json",
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stderr or proc.stdout or "acli epic children failed").strip())
+    rows = json.loads(proc.stdout or "[]")
+    if not isinstance(rows, list):
+        return False
+    for row in rows:
+        fields = row.get("fields") or {}
+        if not _status_is_terminal(fields.get("status"), cfg):
+            return False
+    return True
 
 
 def _extract_pr_link(value: object) -> str | None:
@@ -271,6 +311,7 @@ def enrich_jira_issues(
             pr_link = None
             if cfg.jira_pr_link_field:
                 pr_link = _extract_pr_link(f.get(cfg.jira_pr_link_field))
+            issue_type = ((f.get("issuetype") or {}).get("name") or "")
             site = cfg.jira_site or "redhat.atlassian.net"
             url = f"https://{site}/browse/{key}"
             snap = JiraIssueSnapshot(
@@ -281,8 +322,21 @@ def enrich_jira_issues(
                 flagged=_flagged_from_fields(f),
                 labels=labels,
                 pr_link=pr_link,
+                issue_type=issue_type,
             )
             out[key] = (snap, summary, url)
+
+    # Fill epic child rollups (one search per epic)
+    classify_cfg = cfg.classify_config()
+    for key, (snap, summary, url) in list(out.items()):
+        if snap.issue_type.casefold() != "epic":
+            continue
+        try:
+            all_done = epic_children_all_done(key, classify_cfg)
+        except RuntimeError:
+            all_done = False
+        snap.epic_children_all_done = all_done
+        out[key] = (snap, summary, url)
     return out
 
 

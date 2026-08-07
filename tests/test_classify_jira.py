@@ -100,3 +100,73 @@ def test_testing_qa_only_actionable():
     )
     assert r.should_track
     assert r.action == ActionState.ACTIONABLE
+
+
+def test_epic_pending_while_children_open():
+    r = classify_jira(
+        JiraIssueSnapshot(
+            key="X-1",
+            status="In Progress",
+            assignee_is_user=True,
+            issue_type="Epic",
+            epic_children_all_done=False,
+        )
+    )
+    assert r.action == ActionState.PENDING
+    assert "jira_epic_children_open" in r.reasons
+
+
+def test_epic_actionable_when_children_done():
+    r = classify_jira(
+        JiraIssueSnapshot(
+            key="X-1",
+            status="In Progress",
+            assignee_is_user=True,
+            issue_type="Epic",
+            epic_children_all_done=True,
+        )
+    )
+    assert r.action == ActionState.ACTIONABLE
+    assert "jira_epic_children_done" in r.reasons
+
+
+def test_epic_unknown_children_pending():
+    r = classify_jira(
+        JiraIssueSnapshot(
+            key="X-1",
+            status="In Progress",
+            assignee_is_user=True,
+            issue_type="Epic",
+            epic_children_all_done=None,
+        )
+    )
+    assert r.action == ActionState.PENDING
+    assert "jira_epic_children_unknown" in r.reasons
+
+
+def test_epic_done_status_still_done():
+    r = classify_jira(
+        JiraIssueSnapshot(
+            key="X-1",
+            status="Closed",
+            assignee_is_user=True,
+            issue_type="Epic",
+            epic_children_all_done=True,
+        )
+    )
+    assert r.action == ActionState.DONE
+
+
+def test_story_not_affected_by_epic_fields():
+    r = classify_jira(
+        JiraIssueSnapshot(
+            key="X-1",
+            status="In Progress",
+            assignee_is_user=True,
+            issue_type="Story",
+            epic_children_all_done=False,
+        )
+    )
+    assert r.action == ActionState.ACTIONABLE
+    assert "jira_active_assignee" in r.reasons
+

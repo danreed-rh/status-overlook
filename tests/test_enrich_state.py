@@ -37,3 +37,17 @@ def test_remote_status_merged_not_open_ci_fail():
         ci_failed=True,
     )
     assert github_remote_status(snap) == "merged"
+
+
+def test_status_is_terminal_category_and_name():
+    from status_overlook.enrich import _status_is_terminal
+    from status_overlook.models import ClassifyConfig
+
+    cfg = ClassifyConfig()
+    assert _status_is_terminal(
+        {"name": "Whatever", "statusCategory": {"key": "done"}}, cfg
+    )
+    assert _status_is_terminal({"name": "Closed", "statusCategory": {"key": "new"}}, cfg)
+    assert not _status_is_terminal(
+        {"name": "In Progress", "statusCategory": {"key": "indeterminate"}}, cfg
+    )
