@@ -45,6 +45,13 @@ class TrackedItem:
     last_seen_at: str = ""
     finished_at: str | None = None
     last_read_at: str | None = None
+    # Phase 3 classification
+    action: str = ""  # actionable|pending|blocked|done|ignore
+    blocked: bool = False
+    reasons: list[str] = field(default_factory=list)
+    state_changed_at: str = ""
+    state_fingerprint: str = ""
+    remote_updated_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -64,6 +71,12 @@ class TrackedItem:
             last_seen_at=str(data.get("last_seen_at") or ""),
             finished_at=data.get("finished_at"),
             last_read_at=data.get("last_read_at"),
+            action=str(data.get("action") or ""),
+            blocked=bool(data.get("blocked")),
+            reasons=list(data.get("reasons") or []),
+            state_changed_at=str(data.get("state_changed_at") or ""),
+            state_fingerprint=str(data.get("state_fingerprint") or ""),
+            remote_updated_at=str(data.get("remote_updated_at") or ""),
         )
 
 
