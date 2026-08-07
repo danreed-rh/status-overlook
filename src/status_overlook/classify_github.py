@@ -43,7 +43,7 @@ def classify_github(
 
     if pr.state.casefold() != "open":
         return ClassificationResult(
-            lifecycle=Lifecycle.DONE,
+            lifecycle=Lifecycle.UNTRACKED,
             action=ActionState.IGNORE,
             reasons=("github_pr_not_open",),
         )
