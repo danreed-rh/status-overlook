@@ -30,8 +30,11 @@ def classify_github(
 
     - merged/closed → done
     - linked Jira blocked → blocked (overrides other states)
-    - open + assignee who gave /lgtm or lgtm label (and is not author) → pending
-    - open + involved:
+    - open + assignee (not author):
+        - unresolved own review threads → pending (waiting on author)
+        - gave /lgtm or lgtm label → pending
+        - otherwise → actionable (need to review / re-review)
+    - open + author (and other involved paths):
         - unresolved reviews or CI failures → actionable
         - author + actionable label (default: lgtm) → actionable (ready to merge)
         - author draft → actionable
@@ -70,12 +73,24 @@ def classify_github(
             reasons=("github_not_involved",),
         )
 
-    # Assignee already signed off — waiting on author/merge, not more review work
-    if pr.assignee_is_user and not pr.author_is_user and pr.user_gave_lgtm:
+    # Assignee reviewer path (not the PR author)
+    if pr.assignee_is_user and not pr.author_is_user:
+        if pr.assignee_unresolved_threads:
+            return ClassificationResult(
+                lifecycle=Lifecycle.ACTIVE,
+                action=ActionState.PENDING,
+                reasons=("github_assignee_waiting_on_author",),
+            )
+        if pr.user_gave_lgtm:
+            return ClassificationResult(
+                lifecycle=Lifecycle.ACTIVE,
+                action=ActionState.PENDING,
+                reasons=("github_assignee_lgtm",),
+            )
         return ClassificationResult(
             lifecycle=Lifecycle.ACTIVE,
-            action=ActionState.PENDING,
-            reasons=("github_assignee_lgtm",),
+            action=ActionState.ACTIONABLE,
+            reasons=("github_assignee_to_review",),
         )
 
     has_actionable_label = _label_hit(

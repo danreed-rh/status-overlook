@@ -62,6 +62,34 @@ def test_assignee_lgtm_pending():
     assert "github_assignee_lgtm" in r.reasons
 
 
+def test_assignee_unresolved_threads_pending():
+    r = classify_github(
+        _pr(assignee_is_user=True, assignee_unresolved_threads=True)
+    )
+    assert r.action == ActionState.PENDING
+    assert "github_assignee_waiting_on_author" in r.reasons
+
+
+def test_assignee_resolved_threads_actionable():
+    r = classify_github(
+        _pr(assignee_is_user=True, assignee_unresolved_threads=False)
+    )
+    assert r.action == ActionState.ACTIONABLE
+    assert "github_assignee_to_review" in r.reasons
+
+
+def test_assignee_unresolved_threads_before_lgtm():
+    r = classify_github(
+        _pr(
+            assignee_is_user=True,
+            assignee_unresolved_threads=True,
+            user_gave_lgtm=True,
+        )
+    )
+    assert r.action == ActionState.PENDING
+    assert "github_assignee_waiting_on_author" in r.reasons
+
+
 def test_assignee_lgtm_overrides_ci_fail():
     r = classify_github(
         _pr(

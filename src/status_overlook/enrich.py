@@ -155,7 +155,68 @@ def github_remote_status(snap: GitHubPrSnapshot) -> str:
         status = f"{status}+ci_fail"
     if snap.has_unresolved_reviews:
         status = f"{status}+changes_requested"
+    if snap.assignee_unresolved_threads:
+        status = f"{status}+awaiting_author"
     return status
+
+
+def assignee_has_unresolved_review_threads(
+    repo: str, number: int, me: str
+) -> bool:
+    """True if ``me`` started any inline review thread that is still unresolved."""
+    if "/" not in repo:
+        return False
+    owner, name = repo.split("/", 1)
+    query = (
+        "query($owner:String!,$name:String!,$number:Int!){"
+        "repository(owner:$owner,name:$name){"
+        "pullRequest(number:$number){"
+        "reviewThreads(first:100){"
+        "nodes{isResolved comments(first:1){nodes{author{login}}}}"
+        "}}}}"
+    )
+    proc = subprocess.run(
+        [
+            "gh",
+            "api",
+            "graphql",
+            "-f",
+            f"query={query}",
+            "-f",
+            f"owner={owner}",
+            "-f",
+            f"name={name}",
+            "-F",
+            f"number={number}",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return False
+    try:
+        payload = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        return False
+    nodes = (
+        ((payload.get("data") or {}).get("repository") or {})
+        .get("pullRequest", {})
+        .get("reviewThreads", {})
+        .get("nodes")
+        or []
+    )
+    me_cf = me.casefold()
+    for thread in nodes:
+        if thread.get("isResolved"):
+            continue
+        comments = ((thread.get("comments") or {}).get("nodes")) or []
+        if not comments:
+            continue
+        author = ((comments[0].get("author") or {}).get("login") or "").casefold()
+        if author == me_cf:
+            return True
+    return False
 
 
 def enrich_github_pr(
@@ -193,6 +254,11 @@ def enrich_github_pr(
         str(data.get("state") or "open"), data.get("mergedAt")
     )
     assignee_is_user = me in assignees
+    unresolved_threads = False
+    if assignee_is_user and author != me:
+        unresolved_threads = assignee_has_unresolved_review_threads(
+            repo, int(data.get("number") or num_s), me
+        )
     return GitHubPrSnapshot(
         repo=repo,
         number=int(data.get("number") or num_s),
@@ -213,6 +279,7 @@ def enrich_github_pr(
             actionable_labels=classify_cfg.actionable_labels,
             label_insensitive=classify_cfg.label_match_case_insensitive,
         ),
+        assignee_unresolved_threads=unresolved_threads,
     ), str(data.get("title") or item.summary), str(data.get("url") or item.url)
 
 
