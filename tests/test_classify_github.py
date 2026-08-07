@@ -48,10 +48,42 @@ def test_author_draft_actionable():
     assert r.action == ActionState.ACTIONABLE
 
 
-def test_lgtm_label_actionable():
+def test_lgtm_label_actionable_for_author():
     r = classify_github(_pr(author_is_user=True, labels=("lgtm",)))
     assert r.action == ActionState.ACTIONABLE
     assert "github_actionable_label" in r.reasons
+
+
+def test_assignee_lgtm_pending():
+    r = classify_github(
+        _pr(assignee_is_user=True, labels=("lgtm",), user_gave_lgtm=True)
+    )
+    assert r.action == ActionState.PENDING
+    assert "github_assignee_lgtm" in r.reasons
+
+
+def test_assignee_lgtm_overrides_ci_fail():
+    r = classify_github(
+        _pr(
+            assignee_is_user=True,
+            user_gave_lgtm=True,
+            ci_failed=True,
+            labels=("lgtm",),
+        )
+    )
+    assert r.action == ActionState.PENDING
+
+
+def test_author_still_actionable_with_lgtm_even_if_also_assignee():
+    r = classify_github(
+        _pr(
+            author_is_user=True,
+            assignee_is_user=True,
+            user_gave_lgtm=True,
+            labels=("lgtm",),
+        )
+    )
+    assert r.action == ActionState.ACTIONABLE
 
 
 def test_slash_lgtm_not_default():

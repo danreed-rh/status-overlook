@@ -15,6 +15,40 @@ from status_overlook.models import ActionState, ClassifyConfig, GitHubPrSnapshot
 from status_overlook.store import TrackStore, TrackedItem, _iso, _utcnow
 
 _JIRA_KEY_RE = re.compile(r"\b([A-Z][A-Z0-9]+-\d+)\b")
+# Prow/ODH style approval comment; not the label name alone
+_LGTM_COMMENT_RE = re.compile(r"(?m)(?:^|\s)/lgtm\b", re.IGNORECASE)
+
+
+def _body_has_slash_lgtm(body: str) -> bool:
+    return bool(_LGTM_COMMENT_RE.search(body or ""))
+
+
+def _user_gave_lgtm(
+    data: dict,
+    *,
+    me: str,
+    assignee_is_user: bool,
+    labels: tuple[str, ...],
+    actionable_labels: tuple[str, ...],
+    label_insensitive: bool,
+) -> bool:
+    """True if this user posted /lgtm or (as assignee) the PR has an lgtm-style label."""
+    for comment in data.get("comments") or []:
+        author = ((comment.get("author") or {}).get("login") or "").casefold()
+        if author == me and _body_has_slash_lgtm(str(comment.get("body") or "")):
+            return True
+    for review in data.get("reviews") or []:
+        author = ((review.get("author") or {}).get("login") or "").casefold()
+        if author == me and _body_has_slash_lgtm(str(review.get("body") or "")):
+            return True
+    if assignee_is_user:
+        if label_insensitive:
+            have = {x.casefold() for x in labels}
+            if any(w.casefold() in have for w in actionable_labels):
+                return True
+        elif any(w in labels for w in actionable_labels):
+            return True
+    return False
 
 
 @dataclass
@@ -125,11 +159,14 @@ def github_remote_status(snap: GitHubPrSnapshot) -> str:
 
 
 def enrich_github_pr(
-    item: TrackedItem, identity: Identity
+    item: TrackedItem,
+    identity: Identity,
+    cfg: AppConfig | None = None,
 ) -> tuple[GitHubPrSnapshot, str, str]:
     # key is org/repo#n
     if "#" not in item.key:
         raise ValueError(f"bad github key: {item.key}")
+    classify_cfg = (cfg.classify_config() if cfg else ClassifyConfig())
     repo, num_s = item.key.rsplit("#", 1)
     data = _run_json(
         [
@@ -140,7 +177,8 @@ def enrich_github_pr(
             "--repo",
             repo,
             "--json",
-            "number,state,isDraft,mergedAt,author,assignees,labels,reviewDecision,statusCheckRollup,title,url",
+            "number,state,isDraft,mergedAt,author,assignees,labels,reviewDecision,"
+            "statusCheckRollup,title,url,comments,reviews",
         ]
     )
     assert isinstance(data, dict)
@@ -154,6 +192,7 @@ def enrich_github_pr(
     snap_state, merged = normalize_github_pr_state(
         str(data.get("state") or "open"), data.get("mergedAt")
     )
+    assignee_is_user = me in assignees
     return GitHubPrSnapshot(
         repo=repo,
         number=int(data.get("number") or num_s),
@@ -161,11 +200,19 @@ def enrich_github_pr(
         merged=merged,
         draft=bool(data.get("isDraft")),
         author_is_user=author == me,
-        assignee_is_user=me in assignees,
+        assignee_is_user=assignee_is_user,
         labels=labels,
         has_unresolved_reviews=review == "CHANGES_REQUESTED",
         ci_failed=_ci_failed(data.get("statusCheckRollup")),
         linked_jira_blocked=False,  # filled after jira map known
+        user_gave_lgtm=_user_gave_lgtm(
+            data,
+            me=me,
+            assignee_is_user=assignee_is_user,
+            labels=labels,
+            actionable_labels=classify_cfg.actionable_labels,
+            label_insensitive=classify_cfg.label_match_case_insensitive,
+        ),
     ), str(data.get("title") or item.summary), str(data.get("url") or item.url)
 
 
@@ -445,7 +492,7 @@ def enrich_and_classify_store(store: TrackStore, cfg: AppConfig) -> tuple[int, i
     for item in gh_items:
         classified += 1
         try:
-            snap, title, url = enrich_github_pr(item, identity)
+            snap, title, url = enrich_github_pr(item, identity, cfg)
         except RuntimeError:
             continue
         keys_in_title = set(_JIRA_KEY_RE.findall(title))

@@ -30,9 +30,10 @@ def classify_github(
 
     - merged/closed → done
     - linked Jira blocked → blocked (overrides other states)
+    - open + assignee who gave /lgtm or lgtm label (and is not author) → pending
     - open + involved:
         - unresolved reviews or CI failures → actionable
-        - actionable label (default: lgtm) → actionable
+        - author + actionable label (default: lgtm) → actionable (ready to merge)
         - author draft → actionable
         - otherwise → pending
     """
@@ -69,11 +70,25 @@ def classify_github(
             reasons=("github_not_involved",),
         )
 
+    # Assignee already signed off — waiting on author/merge, not more review work
+    if pr.assignee_is_user and not pr.author_is_user and pr.user_gave_lgtm:
+        return ClassificationResult(
+            lifecycle=Lifecycle.ACTIVE,
+            action=ActionState.PENDING,
+            reasons=("github_assignee_lgtm",),
+        )
+
+    has_actionable_label = _label_hit(
+        pr.labels, cfg.actionable_labels, cfg.label_match_case_insensitive
+    )
+    # lgtm-style labels mean "ready to merge" for the author, not for assignees
+    author_ready_label = pr.author_is_user and has_actionable_label
+
     if pr.has_unresolved_reviews:
         reasons.append("github_unresolved_reviews")
     if pr.ci_failed:
         reasons.append("github_ci_failed")
-    if _label_hit(pr.labels, cfg.actionable_labels, cfg.label_match_case_insensitive):
+    if author_ready_label:
         reasons.append("github_actionable_label")
     if pr.author_is_user and pr.draft:
         reasons.append("github_author_draft")
@@ -81,7 +96,7 @@ def classify_github(
     needs_action = bool(
         pr.has_unresolved_reviews
         or pr.ci_failed
-        or _label_hit(pr.labels, cfg.actionable_labels, cfg.label_match_case_insensitive)
+        or author_ready_label
         or (pr.author_is_user and pr.draft)
     )
 

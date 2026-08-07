@@ -21,6 +21,8 @@
 | PR open + unresolved reviews or CI fail | actionable |
 | PR open + otherwise involved | pending |
 | PR linked Jira blocked | **blocked** |
+| PR `lgtm` label | **actionable** for **author** (ready to merge); not for assignee-only |
+| PR assignee + user `/lgtm` comment or `lgtm` label | **pending** (`github_assignee_lgtm`) — signed off, waiting |
 | PR actionable labels | `lgtm` only (default) |
 | Blocked detection | **Any of:** status in `status_blocked` (default `Blocked`), label in `blocked_labels` (default `blocked`), or Jira **Flagged** impediment |
 

@@ -76,6 +76,8 @@ class GitHubPrSnapshot:
     # Provider-filled: CHANGES_REQUESTED / outstanding review requests, failing checks
     has_unresolved_reviews: bool = False
     ci_failed: bool = False
+    # User (assignee/reviewer) posted /lgtm or applied an actionable label
+    user_gave_lgtm: bool = False
 
 
 @dataclass(frozen=True)
