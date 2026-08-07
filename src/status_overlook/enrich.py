@@ -100,6 +100,30 @@ def _ci_failed(rollup: list[dict] | None) -> bool:
     return False
 
 
+def normalize_github_pr_state(raw_state: str, merged_at: object) -> tuple[str, bool]:
+    """Map gh PR state to (snap_state open|closed, merged).
+
+    ``gh`` returns OPEN | CLOSED | MERGED. MERGED must not be treated as open.
+    """
+    state = (raw_state or "open").casefold()
+    merged = bool(merged_at) or state == "merged"
+    if merged or state == "closed":
+        return "closed", merged
+    return "open", False
+
+
+def github_remote_status(snap: GitHubPrSnapshot) -> str:
+    """Human-facing remote status for digests / fingerprints."""
+    if snap.merged:
+        return "merged"
+    status = "draft" if snap.draft else snap.state
+    if snap.ci_failed:
+        status = f"{status}+ci_fail"
+    if snap.has_unresolved_reviews:
+        status = f"{status}+changes_requested"
+    return status
+
+
 def enrich_github_pr(
     item: TrackedItem, identity: Identity
 ) -> tuple[GitHubPrSnapshot, str, str]:
@@ -127,12 +151,13 @@ def enrich_github_pr(
     me = identity.github_login.casefold()
     labels = tuple(x.get("name") or "" for x in (data.get("labels") or []))
     review = (data.get("reviewDecision") or "").upper()
-    state = (data.get("state") or "open").lower()
-    merged = bool(data.get("mergedAt"))
+    snap_state, merged = normalize_github_pr_state(
+        str(data.get("state") or "open"), data.get("mergedAt")
+    )
     return GitHubPrSnapshot(
         repo=repo,
         number=int(data.get("number") or num_s),
-        state="closed" if state == "closed" else "open",
+        state=snap_state,
         merged=merged,
         draft=bool(data.get("isDraft")),
         author_is_user=author == me,
@@ -387,11 +412,7 @@ def enrich_and_classify_store(store: TrackStore, cfg: AppConfig) -> tuple[int, i
             lifecycle = "active"
         else:
             lifecycle = item.lifecycle
-        remote_status = "draft" if snap.draft else snap.state
-        if snap.ci_failed:
-            remote_status = f"{remote_status}+ci_fail"
-        if snap.has_unresolved_reviews:
-            remote_status = f"{remote_status}+changes_requested"
+        remote_status = github_remote_status(snap)
         changed = apply_classification_to_item(
             item,
             action=result.action,
