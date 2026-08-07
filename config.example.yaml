@@ -1,0 +1,25 @@
+# Minimal example. Prefer `status-overlook init` (later): it will probe `gh` / `acli`
+# and fill identity fields so you rarely edit this by hand.
+
+schema_version: 1
+
+# Usually detected from `gh api user` / acli auth — leave empty until init exists
+github:
+  login: ""
+  actionable_labels:
+    - lgtm
+    - /lgtm
+
+jira:
+  site: ""
+  # Custom field IDs only when your site needs them (QA contact, PR link, etc.)
+  qa_contact_field: ""
+  pr_link_field: ""
+
+# Optional manual pins
+pins:
+  jira: []
+  github: []
+
+scheduler:
+  every_minutes: 15
