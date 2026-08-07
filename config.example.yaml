@@ -1,28 +1,30 @@
-# Minimal example. Prefer `status-overlook init` (later): it will probe `gh` / `acli`
-# and fill identity fields so you rarely edit this by hand.
+# Minimal example. Prefer `status-overlook init` (later): it will probe `gh` / `acli`.
+# Copy to: ~/Library/Application Support/status-overlook/config.yaml  (macOS)
 
 schema_version: 1
 
-# Usually detected from `gh api user` / acli auth — leave empty until init exists
 github:
   login: ""
   actionable_labels:
     - lgtm
 
 jira:
-  site: ""
-  qa_contact_field: ""
+  site: ""   # e.g. redhat.atlassian.net — used for browse URLs
+  qa_contact_field: ""   # e.g. customfield_10470 for Testing QA-contact discovery
   pr_link_field: ""
-  # Blocked if any match (providers set flagged from Jira Flagged/impediment)
   status_blocked:
     - Blocked
   blocked_labels:
     - blocked
+  status_testing:
+    - Testing
 
-# Optional manual pins
 pins:
-  jira: []
-  github: []
+  jira: []       # e.g. ["RHOAIENG-123"]
+  github: []     # e.g. ["opendatahub-io/odh-dashboard#8787"]
+
+done_retention_days: 7
+search_limit: 50
 
 scheduler:
   every_minutes: 15

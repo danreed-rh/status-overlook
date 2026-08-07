@@ -27,8 +27,8 @@
 
 | ID | Question | Gate |
 |----|----------|------|
+| Q3 | Done retention | 2 | **Default 7 days** — confirm at Gate 2 |
 | Q2 | Blocked detection | 1 | **Done:** status + `blocked` label + Flagged |
-| Q3 | Done retention | 2 |
 | Q4 | Cross-link strategy | 3 |
 | Q5 | Schedule interval | 4 |
 | Q7 | Final docs cleanup | 5 |
