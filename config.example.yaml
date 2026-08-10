@@ -1,5 +1,5 @@
-# Minimal example. Prefer `status-overlook init` (later): it will probe `gh` / `acli`.
-# Copy to: ~/Library/Application Support/status-overlook/config.yaml  (macOS)
+# Example config. Prefer: status-overlook init
+# macOS path: ~/Library/Application Support/status-overlook/config.yaml
 
 schema_version: 1
 
@@ -9,19 +9,32 @@ github:
     - lgtm
 
 jira:
-  site: ""   # e.g. redhat.atlassian.net — used for browse URLs
-  qa_contact_field: ""   # e.g. customfield_10470 for Testing QA-contact discovery
-  pr_link_field: ""
+  site: ""              # e.g. redhat.atlassian.net
+  account_id: ""        # Atlassian accountId (init probes when possible)
+  qa_contact_field: ""  # e.g. customfield_10470
+  pr_link_field: ""     # e.g. customfield_10875
   status_blocked:
     - Blocked
   blocked_labels:
     - blocked
   status_testing:
     - Testing
+  status_active:
+    - New
+    - To Do
+    - In Progress
+  status_review:
+    - Review
+    - In Review
+    - Code Review
+  status_done:
+    - Resolved
+    - Closed
+    - Done
 
 pins:
-  jira: []       # e.g. ["RHOAIENG-123"]
-  github: []     # e.g. ["opendatahub-io/odh-dashboard#8787"]
+  jira: []
+  github: []
 
 done_retention_days: 7
 search_limit: 50

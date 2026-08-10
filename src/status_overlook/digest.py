@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from status_overlook.fsutil import ensure_private_dir, write_private_text
 from status_overlook.paths import cache_dir, digest_json_path, digest_md_path
 from status_overlook.store import TrackStore, TrackedItem, _iso, _utcnow, parse_iso
 
@@ -117,14 +118,14 @@ def build_digest_json(store: TrackStore, *, generated_at: str | None = None) -> 
 
 
 def write_digests(store: TrackStore) -> tuple[Path, Path]:
-    cache_dir().mkdir(parents=True, exist_ok=True)
+    ensure_private_dir(cache_dir())
     generated_at = _iso_now()
     md_path = digest_md_path()
     json_path = digest_json_path()
-    md_path.write_text(build_digest_markdown(store, generated_at=generated_at), encoding="utf-8")
-    json_path.write_text(
+    write_private_text(md_path, build_digest_markdown(store, generated_at=generated_at))
+    write_private_text(
+        json_path,
         json.dumps(build_digest_json(store, generated_at=generated_at), indent=2) + "\n",
-        encoding="utf-8",
     )
     return md_path, json_path
 

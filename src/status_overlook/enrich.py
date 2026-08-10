@@ -77,29 +77,29 @@ def resolve_identity(cfg: AppConfig) -> Identity:
         if proc.returncode != 0:
             raise RuntimeError((proc.stderr or "gh api user failed").strip())
         login = (proc.stdout or "").strip().strip('"')
-    # Discover Jira accountId from an assigned issue if possible
-    account_id = ""
-    try:
-        rows = _run_json(
-            [
-                "acli",
-                "jira",
-                "workitem",
-                "search",
-                "--jql",
-                "assignee = currentUser() AND resolution = EMPTY",
-                "--fields",
-                "assignee",
-                "--limit",
-                "1",
-                "--json",
-            ]
-        )
-        if isinstance(rows, list) and rows:
-            assignee = (rows[0].get("fields") or {}).get("assignee") or {}
-            account_id = str(assignee.get("accountId") or "")
-    except RuntimeError:
-        account_id = ""
+    account_id = cfg.jira_account_id.strip()
+    if not account_id:
+        try:
+            rows = _run_json(
+                [
+                    "acli",
+                    "jira",
+                    "workitem",
+                    "search",
+                    "--jql",
+                    "assignee = currentUser() AND resolution = EMPTY",
+                    "--fields",
+                    "assignee",
+                    "--limit",
+                    "1",
+                    "--json",
+                ]
+            )
+            if isinstance(rows, list) and rows:
+                assignee = (rows[0].get("fields") or {}).get("assignee") or {}
+                account_id = str(assignee.get("accountId") or "")
+        except RuntimeError:
+            account_id = ""
     return Identity(github_login=login, jira_account_id=account_id)
 
 
@@ -444,8 +444,11 @@ def enrich_jira_issues(
             if cfg.jira_pr_link_field:
                 pr_link = _extract_pr_link(f.get(cfg.jira_pr_link_field))
             issue_type = ((f.get("issuetype") or {}).get("name") or "")
-            site = cfg.jira_site or "redhat.atlassian.net"
-            url = f"https://{site}/browse/{key}"
+            site = cfg.jira_site.strip()
+            if site:
+                url = f"https://{site}/browse/{key}"
+            else:
+                url = ""
             snap = JiraIssueSnapshot(
                 key=key,
                 status=status,

@@ -8,10 +8,13 @@ import sys
 from status_overlook import __version__
 from status_overlook.digest import build_digest_markdown, is_unread, mark_read, write_digests
 from status_overlook.doctor import print_doctor, run_doctor
+from status_overlook.init import run_init
 from status_overlook.paths import all_managed_paths, digest_md_path, track_store_path
 from status_overlook.reconcile import run_reconcile
 from status_overlook.run import run_pipeline
+from status_overlook.scheduler import install_scheduler, uninstall_scheduler
 from status_overlook.store import load_store, save_store
+from status_overlook.uninstall import run_uninstall
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -26,7 +29,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub = parser.add_subparsers(dest="command")
 
-    sub.add_parser("doctor", help="Check CLIs and auth")
+    p_init = sub.add_parser("init", help="Probe CLIs and write config.yaml")
+    p_init.add_argument("--force", action="store_true", help="Overwrite existing config")
+    p_init.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Use probed defaults without prompts",
+    )
+
+    p_doc = sub.add_parser("doctor", help="Check CLIs, auth, and config")
+    p_doc.add_argument("--skip-github", action="store_true")
+    p_doc.add_argument("--skip-jira", action="store_true")
+
     sub.add_parser("paths", help="Print managed file locations")
 
     p_rec = sub.add_parser("reconcile", help="Discover assigned work and update track store")
@@ -61,6 +75,20 @@ def main(argv: list[str] | None = None) -> int:
     p_mr.add_argument("ids", nargs="*", help="Item ids (e.g. jira:RHOAIENG-1)")
     p_mr.add_argument("--all", action="store_true", help="Mark every item read")
 
+    p_is = sub.add_parser("install-scheduler", help="Install Mac LaunchAgent (Phase 4)")
+    p_is.add_argument(
+        "--every",
+        default="15m",
+        help="Interval (e.g. 15m, 900s, 1h). Default 15m",
+    )
+
+    p_us = sub.add_parser("uninstall-scheduler", help="Remove Mac LaunchAgent")
+    p_us.add_argument("--dry-run", action="store_true")
+
+    p_un = sub.add_parser("uninstall", help="Remove scheduler + app data dirs")
+    p_un.add_argument("--dry-run", action="store_true")
+    p_un.add_argument("-y", "--yes", action="store_true", help="Do not prompt")
+
     # Back-compat alias
     p_ss = sub.add_parser("show-store", help=argparse.SUPPRESS)
     p_ss.add_argument("--all", action="store_true")
@@ -70,10 +98,22 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
 
+    if args.command == "init":
+        return run_init(non_interactive=args.non_interactive, force=args.force)
+
     if args.command == "doctor":
-        results = run_doctor()
+        results = run_doctor(
+            require_gh=not args.skip_github,
+            require_acli=not args.skip_jira,
+        )
         print_doctor(results)
-        return 0 if all(r.ok for r in results) else 1
+        from status_overlook.doctor import doctor_ok
+
+        return 0 if doctor_ok(
+            results,
+            require_gh=not args.skip_github,
+            require_acli=not args.skip_jira,
+        ) else 1
 
     if args.command == "paths":
         for path in all_managed_paths():
@@ -117,14 +157,17 @@ def main(argv: list[str] | None = None) -> int:
                 )
             return 0
 
-        # Digest mode
         md = build_digest_markdown(store)
         if args.since_read or args.section:
-            # Filter via JSON-ish rebuild
-            from status_overlook.digest import _section_items, _format_line
+            from status_overlook.digest import _format_line, _section_items
 
             sections = (
-                [("Actionable", "actionable"), ("Blocked", "blocked"), ("Pending", "pending"), ("Recently done", "done")]
+                [
+                    ("Actionable", "actionable"),
+                    ("Blocked", "blocked"),
+                    ("Pending", "pending"),
+                    ("Recently done", "done"),
+                ]
                 if not args.section
                 else [(args.section.title(), args.section)]
             )
@@ -157,6 +200,15 @@ def main(argv: list[str] | None = None) -> int:
         write_digests(store)
         print(f"Marked {n} item(s) read")
         return 0
+
+    if args.command == "install-scheduler":
+        return install_scheduler(every=args.every)
+
+    if args.command == "uninstall-scheduler":
+        return uninstall_scheduler(dry_run=args.dry_run)
+
+    if args.command == "uninstall":
+        return run_uninstall(dry_run=args.dry_run, yes=args.yes)
 
     return 0
 

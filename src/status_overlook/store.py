@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
+from status_overlook.fsutil import ensure_private_dir, write_private_text
 from status_overlook.paths import data_dir, track_store_path
 
 STORE_SCHEMA_VERSION = 1
@@ -140,10 +141,11 @@ def load_store(path: Path | None = None) -> TrackStore:
 
 def save_store(store: TrackStore, path: Path | None = None) -> Path:
     path = path or track_store_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # Ensure data_dir exists even if store path overridden oddly
-    data_dir().mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(store.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    ensure_private_dir(path.parent)
+    ensure_private_dir(data_dir())
+    write_private_text(
+        path, json.dumps(store.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return path
 
 

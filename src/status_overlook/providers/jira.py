@@ -53,8 +53,6 @@ def _issue_candidate(row: dict, *, site: str) -> Candidate:
     summary = str(fields.get("summary") or "")
     if site:
         url = f"https://{site}/browse/{key}"
-    elif key:
-        url = f"https://redhat.atlassian.net/browse/{key}"
     else:
         url = str(row.get("self") or "")
     return Candidate(
@@ -77,6 +75,11 @@ def fetch_assigned_and_qa_issues(
     fields = "key,summary,status,labels"
     jql_assignee = "assignee = currentUser() AND resolution = EMPTY"
     rows = _acli_search(jql_assignee, fields=fields, limit=limit)
+    if len(rows) >= limit:
+        print(
+            f"Warning: Jira assignee search hit limit={limit}; "
+            "raise search_limit in config or some issues may look finished."
+        )
 
     if qa_contact_field:
         jql_cf = qa_field_to_jql(qa_contact_field)

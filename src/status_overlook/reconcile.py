@@ -40,7 +40,7 @@ def run_reconcile(
         print("No config file found; using defaults.")
         print(f"  (expected {__import__('status_overlook.paths', fromlist=['config_path']).config_path()})")
 
-    results = run_doctor(require_gh=not skip_github, require_acli=not skip_jira)
+    results = run_doctor(require_gh=not skip_github, require_acli=not skip_jira, cfg=cfg)
     print_doctor(results)
     if not doctor_ok(results, require_gh=not skip_github, require_acli=not skip_jira):
         return load_store(), ReconcileStats(), 1

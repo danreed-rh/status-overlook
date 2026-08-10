@@ -67,4 +67,9 @@ def fetch_open_prs(*, limit: int = 50) -> list[Candidate]:
     for row in authored + assigned:
         cand = _pr_candidate(row)
         by_id[cand.id] = cand
+    if len(authored) >= limit or len(assigned) >= limit:
+        print(
+            f"Warning: GitHub PR search hit limit={limit}; "
+            "raise search_limit in config or some PRs may look finished."
+        )
     return list(by_id.values())
