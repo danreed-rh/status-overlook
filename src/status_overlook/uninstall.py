@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import shutil
 
-from status_overlook.paths import all_managed_paths, launch_agent_plist_path
+from status_overlook.paths import (
+    all_managed_paths,
+    launch_agent_plist_path,
+    systemd_service_path,
+    systemd_timer_path,
+    windows_task_xml_path,
+)
 from status_overlook.scheduler import uninstall_scheduler
 
 
@@ -27,10 +33,17 @@ def run_uninstall(*, dry_run: bool = False, yes: bool = False) -> int:
 
     uninstall_scheduler(dry_run=False)
 
-    # Remove dirs (config_dir == data_dir on Mac)
+    skip_files = {
+        launch_agent_plist_path(),
+        systemd_service_path(),
+        systemd_timer_path(),
+        windows_task_xml_path(),
+    }
+
+    # Remove dirs (config_dir == data_dir on Mac/Windows)
     removed: list[str] = []
     for p in paths:
-        if p == launch_agent_plist_path():
+        if p in skip_files:
             continue
         if not p.exists():
             continue
@@ -47,6 +60,5 @@ def run_uninstall(*, dry_run: bool = False, yes: bool = False) -> int:
             print(f"  {r}")
     else:
         print("Nothing left to remove.")
-    # Note: pipx/uv tool uninstall is separate
-    print("Tool binary not removed — use pipx uninstall status-overlook (or your install method).")
+    print("Tool binary not removed — use: pipx uninstall status-overlook  (or uv tool uninstall)")
     return 0

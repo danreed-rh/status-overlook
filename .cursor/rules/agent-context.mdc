@@ -1,0 +1,86 @@
+---
+description: Status Overlook implementation context — architecture, IDs, rules, pitfalls
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# Status Overlook workspace
+
+This repo **implements** Status Overlook (CLI + digests + optional localhost UI). Before non-trivial changes, read [docs/AGENT_CONTEXT.md](../../docs/AGENT_CONTEXT.md) for full handoff detail.
+
+## Agent data contract
+
+Digests on disk (`digest.md` / `digest.json`) or `status-overlook show --plain` — **not** the browser UI for automation.
+
+## Pipeline
+
+`init` → `reconcile` (discover via `acli`/`gh`) → `enrich` + `classify` → `store` → `digest` → `show` / `serve`
+
+`status-overlook run` = reconcile (unless skipped) → enrich/classify → save store → write digests.
+
+| Stage | Module |
+|-------|--------|
+| Discover | `providers/jira.py`, `providers/github.py` |
+| Merge | `store.reconcile` |
+| Enrich | `enrich.py` |
+| Classify | `classify_jira.py`, `classify_github.py`, `classify_github_issue.py` (pure, no I/O) |
+| Present | `digest.py`, `term_show.py`, `serve.py` |
+
+## Three sources (IDs must not collide)
+
+| Source | `source` | Store id prefix | Discovery |
+|--------|----------|-----------------|-----------|
+| Jira | `jira` | `jira:KEY` | `acli` assigned + QA-in-Testing |
+| GitHub PR | `github_pr` | `github-pr:owner/repo#n` | `gh search prs` author **or** assignee |
+| GitHub Issue | `github_issue` | `github-issue:owner/repo#n` | `gh search issues --assignee=@me` **only** |
+
+Legacy: `source=github` / `github:…` for PRs migrates on load via `store.normalize_*`.
+
+`pins.github` → PRs; `pins.github_issues` → issues. `skip_github` skips **both**.
+
+## Timestamps (do not conflate)
+
+- `state_changed_at` — last derived-state change (action, blocked, remote status). No-op runs must **not** bump it.
+- `last_read_at` — user/agent mark-read; unread when `state_changed_at` is after this.
+
+## Action states
+
+`actionable` | `pending` | `blocked` | `done` | `ignore`
+
+Section order: **Actionable → Pending → Blocked → Recently done**.
+
+Classification rules: [docs/DECISIONS.md](../../docs/DECISIONS.md) — do not invent new action states without updating tests and DECISIONS.
+
+Cues (`cues.py`) are display-only next-step labels derived from `reasons` — not new action states and not stored.
+
+Notable: PR authors stay actionable while **any** GraphQL review thread is unresolved (`enrich.probe_pr_review_threads`), not only `CHANGES_REQUESTED`.
+
+## Grouping
+
+Active items collapse in `digest.build_work_groups` (Jira pr_link, PR linked issues, Jira key in title). Recently done is **not** grouped.
+
+## Deferred (do not build without explicit ask)
+
+Team multi-user / ROSA UI, `ghd` provider, write-back to Jira/GitHub, UI polling when only the OS scheduler updates disk.
+
+## Dev workflow
+
+```bash
+.venv/bin/pytest tests/ -q          # after behavior changes; no network in default pytest
+.venv/bin/status-overlook doctor
+.venv/bin/status-overlook run
+.venv/bin/status-overlook show --plain
+.venv/bin/status-overlook serve --open   # restart serve after Python/static changes
+```
+
+Style: stdlib-first; PyYAML for config only; `http.server` for UI. Minimize scope; match neighboring modules.
+
+## Common pitfalls
+
+| Symptom | Likely cause |
+|---------|----------------|
+| Issue missing from digest | Not assignee-discovered; run full `run`; check `track_store.json` |
+| UI missing view/section | Stale `serve` process — restart |
+| Jira items done after `run --skip-jira` | Reconcile finishes absent candidates — use full `run` |
+| Grouped row wrong primary | Open PR wins tie-break in `build_work_groups` |

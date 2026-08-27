@@ -11,6 +11,22 @@ from status_overlook.models import ClassifyConfig
 from status_overlook.paths import config_path
 
 
+DEFAULT_WORKING_DAYS: tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri")
+
+
+@dataclass
+class WorkingHoursConfig:
+    enabled: bool = True
+    timezone: str = ""
+    days: tuple[str, ...] = DEFAULT_WORKING_DAYS
+    start: str = "08:00"
+    end: str = "18:00"
+
+    @classmethod
+    def disabled(cls) -> WorkingHoursConfig:
+        return cls(enabled=False)
+
+
 @dataclass
 class AppConfig:
     github_login: str = ""
@@ -26,9 +42,11 @@ class AppConfig:
     status_review: tuple[str, ...] = ("Review", "In Review", "Code Review")
     status_done: tuple[str, ...] = ("Resolved", "Closed", "Done")
     pins_jira: tuple[str, ...] = ()
-    pins_github: tuple[str, ...] = ()  # org/repo#n
+    pins_github: tuple[str, ...] = ()  # org/repo#n (PRs)
+    pins_github_issues: tuple[str, ...] = ()  # org/repo#n (Issues)
     done_retention_days: int = 7
     search_limit: int = 50
+    working_hours: WorkingHoursConfig = field(default_factory=WorkingHoursConfig.disabled)
     raw: dict[str, Any] = field(default_factory=dict)
 
     def classify_config(self) -> ClassifyConfig:
@@ -72,6 +90,20 @@ def load_config(path: Path | None = None) -> tuple[AppConfig, Path | None]:
     github = data.get("github") or {}
     jira = data.get("jira") or {}
     pins = data.get("pins") or {}
+    wh = data.get("working_hours")
+
+    if wh is None:
+        wh_cfg = WorkingHoursConfig.disabled()
+    else:
+        if not isinstance(wh, dict):
+            raise SystemExit(f"working_hours must be a mapping: {path}")
+        wh_cfg = WorkingHoursConfig(
+            enabled=bool(wh.get("enabled", True)),
+            timezone=str(wh.get("timezone") or ""),
+            days=_as_tuple(wh.get("days"), DEFAULT_WORKING_DAYS),
+            start=str(wh.get("start") or "08:00"),
+            end=str(wh.get("end") or "18:00"),
+        )
 
     cfg = AppConfig(
         github_login=str(github.get("login") or ""),
@@ -92,8 +124,10 @@ def load_config(path: Path | None = None) -> tuple[AppConfig, Path | None]:
         status_done=_as_tuple(jira.get("status_done"), ("Resolved", "Closed", "Done")),
         pins_jira=_as_tuple(pins.get("jira"), ()),
         pins_github=_as_tuple(pins.get("github"), ()),
+        pins_github_issues=_as_tuple(pins.get("github_issues"), ()),
         done_retention_days=int(data.get("done_retention_days") or 7),
         search_limit=int(data.get("search_limit") or 50),
+        working_hours=wh_cfg,
         raw=data,
     )
     return cfg, path
@@ -125,10 +159,18 @@ def save_config(cfg: AppConfig, path: Path | None = None) -> Path:
         "pins": {
             "jira": list(cfg.pins_jira),
             "github": list(cfg.pins_github),
+            "github_issues": list(cfg.pins_github_issues),
         },
         "done_retention_days": cfg.done_retention_days,
         "search_limit": cfg.search_limit,
         "scheduler": {"every_minutes": 15},
+        "working_hours": {
+            "enabled": cfg.working_hours.enabled,
+            "timezone": cfg.working_hours.timezone,
+            "days": list(cfg.working_hours.days),
+            "start": cfg.working_hours.start,
+            "end": cfg.working_hours.end,
+        },
     }
     text = yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
     write_private_text(path, text)

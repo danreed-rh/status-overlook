@@ -13,6 +13,7 @@ from status_overlook.store import (
     ReconcileStats,
     TrackStore,
     load_store,
+    normalize_item_id,
     reconcile,
     save_store,
 )
@@ -23,8 +24,19 @@ def _pin_ids(cfg: AppConfig) -> set[str]:
     for key in cfg.pins_jira:
         pins.add(f"jira:{key}")
     for key in cfg.pins_github:
-        # accept org/repo#n or already github:…
-        pins.add(key if key.startswith("github:") else f"github:{key}")
+        # accept org/repo#n or already github-pr:… / legacy github:…
+        if key.startswith("github-pr:") or key.startswith("github-issue:"):
+            pins.add(key)
+        elif key.startswith("github:"):
+            pins.add(normalize_item_id(key))
+        else:
+            pins.add(f"github-pr:{key}")
+    for key in cfg.pins_github_issues:
+        pins.add(
+            key
+            if key.startswith("github-issue:")
+            else f"github-issue:{key}"
+        )
     return pins
 
 
@@ -49,6 +61,9 @@ def run_reconcile(
     try:
         if not skip_github:
             candidates.extend(github_provider.fetch_open_prs(limit=cfg.search_limit))
+            candidates.extend(
+                github_provider.fetch_assigned_issues(limit=cfg.search_limit)
+            )
         if not skip_jira:
             candidates.extend(
                 jira_provider.fetch_assigned_and_qa_issues(

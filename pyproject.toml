@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "status-overlook"
-version = "0.0.1"
+version = "0.2.0"
 description = "Overlook your Jira and GitHub work status in one local digest"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -12,10 +12,18 @@ requires-python = ">=3.10"
 authors = [{ name = "Status Overlook contributors" }]
 keywords = ["jira", "github", "cli", "productivity", "digest"]
 classifiers = [
-  "Development Status :: 2 - Pre-Alpha",
+  "Development Status :: 4 - Beta",
   "Environment :: Console",
+  "Intended Audience :: Developers",
   "License :: OSI Approved :: Apache Software License",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Utilities",
 ]
 dependencies = ["PyYAML>=6.0"]
@@ -23,11 +31,19 @@ dependencies = ["PyYAML>=6.0"]
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
 
+[project.urls]
+Homepage = "https://github.com/danreed-rh/status-overlook"
+Repository = "https://github.com/danreed-rh/status-overlook"
+Issues = "https://github.com/danreed-rh/status-overlook/issues"
+
 [project.scripts]
 status-overlook = "status_overlook.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+status_overlook = ["web/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

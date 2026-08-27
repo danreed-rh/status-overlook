@@ -1,0 +1,12 @@
+[Unit]
+Description=Status Overlook sync timer
+Documentation=https://github.com/danreed-rh/status-overlook
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+Persistent=true
+Unit=status-overlook.sync.service
+
+[Install]
+WantedBy=timers.target

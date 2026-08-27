@@ -8,7 +8,9 @@ from enum import Enum
 
 class Source(str, Enum):
     JIRA = "jira"
-    GITHUB = "github"
+    GITHUB = "github_pr"  # legacy alias name kept; value is github_pr
+    GITHUB_PR = "github_pr"
+    GITHUB_ISSUE = "github_issue"
 
 
 class Lifecycle(str, Enum):
@@ -53,6 +55,11 @@ class JiraIssueSnapshot:
     flagged: bool = False
     labels: tuple[str, ...] = ()
     pr_link: str | None = None
+    # True when Git Pull Request field points at a merged GitHub PR.
+    # None = not probed / no usable PR URL / probe failed.
+    linked_pr_merged: bool | None = None
+    # True when an "is blocked by" issue link points at a non-terminal issue.
+    blocked_by_unresolved: bool = False
     # Issue type name (e.g. Epic, Story). Case-insensitive Epic check in classify.
     issue_type: str = ""
     # For Epics only: True when every child is done/resolved/closed.
@@ -73,7 +80,7 @@ class GitHubPrSnapshot:
     assignee_is_user: bool = False
     labels: tuple[str, ...] = ()
     linked_jira_blocked: bool = False
-    # Provider-filled: CHANGES_REQUESTED / outstanding review requests, failing checks
+    # Provider-filled: CHANGES_REQUESTED and/or any unresolved inline review threads
     has_unresolved_reviews: bool = False
     ci_failed: bool = False
     # User (assignee/reviewer) posted /lgtm or applied an actionable label
@@ -81,6 +88,24 @@ class GitHubPrSnapshot:
     # User started at least one inline review thread that is still unresolved.
     # None = probe failed / unknown — classify fail-closed as pending.
     assignee_unresolved_threads: bool | None = False
+
+
+@dataclass
+class GitHubIssueSnapshot:
+    """Normalized GitHub Issue fields used for rules."""
+
+    repo: str
+    number: int
+    state: str  # open | closed
+    assignee_is_user: bool = False
+    labels: tuple[str, ...] = ()
+    linked_pr_open: bool = False
+    # True when a linked PR is merged and none remain open.
+    # None = not probed / probe failed.
+    linked_pr_merged: bool | None = None
+    linked_jira_blocked: bool = False
+    # Best open (or merged) PR URL for digest pairing via TrackedItem.pr_link
+    pr_link: str | None = None
 
 
 @dataclass(frozen=True)
@@ -91,7 +116,8 @@ class ClassifyConfig:
     status_review: tuple[str, ...] = ("Review", "In Review", "Code Review")
     status_testing: tuple[str, ...] = ("Testing",)
     status_done: tuple[str, ...] = ("Resolved", "Closed", "Done")
-    # Blocked if ANY of: status in this set, label in blocked_labels, or flagged=True
+    # Blocked if ANY of: status in this set, label in blocked_labels, flagged=True,
+    # or unresolved "is blocked by" issue link (see blocked_by_unresolved on snapshot)
     status_blocked: tuple[str, ...] = ("Blocked",)
     blocked_labels: tuple[str, ...] = ("blocked",)
     # Ready-to-merge style labels on open PRs

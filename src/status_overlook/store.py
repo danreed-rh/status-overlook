@@ -12,8 +12,27 @@ from status_overlook.fsutil import ensure_private_dir, write_private_text
 from status_overlook.paths import data_dir, track_store_path
 
 STORE_SCHEMA_VERSION = 1
-SourceName = Literal["jira", "github"]
+SourceName = Literal["jira", "github_pr", "github_issue"]
 LifecycleName = Literal["active", "done"]
+
+
+def normalize_source_name(source: str) -> SourceName:
+    """Map legacy `github` → `github_pr`."""
+    s = (source or "").casefold()
+    if s in ("github", "github_pr"):
+        return "github_pr"
+    if s == "github_issue":
+        return "github_issue"
+    return "jira"
+
+
+def normalize_item_id(item_id: str) -> str:
+    """Map legacy `github:…` → `github-pr:…`."""
+    if item_id.startswith(("github-pr:", "github-issue:", "jira:")):
+        return item_id
+    if item_id.startswith("github:"):
+        return "github-pr:" + item_id[len("github:") :]
+    return item_id
 
 
 def _utcnow() -> datetime:
@@ -50,6 +69,12 @@ class TrackedItem:
     action: str = ""  # actionable|pending|blocked|done|ignore
     blocked: bool = False
     reasons: list[str] = field(default_factory=list)
+    # Jira issuetype name (e.g. Epic, Story); empty for GitHub / unknown
+    issue_type: str = ""
+    # Jira Git Pull Request field URL, or best linked PR URL for a GitHub Issue
+    pr_link: str = ""
+    # GitHub PR → linked issue store ids (github-issue:owner/repo#n)
+    linked_issue_ids: list[str] = field(default_factory=list)
     state_changed_at: str = ""
     state_fingerprint: str = ""
     remote_updated_at: str = ""
@@ -59,9 +84,18 @@ class TrackedItem:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrackedItem:
+        raw_id = str(data["id"])
+        source = normalize_source_name(str(data.get("source") or ""))
+        item_id = normalize_item_id(raw_id)
+        # If source migrated but id did not (or vice versa), prefer consistent pair.
+        if source == "github_pr" and item_id.startswith("github:"):
+            item_id = normalize_item_id(item_id)
+        if source == "github_issue" and not item_id.startswith("github-issue:"):
+            key = str(data.get("key") or "")
+            item_id = f"github-issue:{key}" if key else item_id
         return cls(
-            id=str(data["id"]),
-            source=data["source"],
+            id=item_id,
+            source=source,
             key=str(data["key"]),
             url=str(data.get("url") or ""),
             summary=str(data.get("summary") or ""),
@@ -75,6 +109,9 @@ class TrackedItem:
             action=str(data.get("action") or ""),
             blocked=bool(data.get("blocked")),
             reasons=list(data.get("reasons") or []),
+            issue_type=str(data.get("issue_type") or ""),
+            pr_link=str(data.get("pr_link") or ""),
+            linked_issue_ids=[str(x) for x in (data.get("linked_issue_ids") or [])],
             state_changed_at=str(data.get("state_changed_at") or ""),
             state_fingerprint=str(data.get("state_fingerprint") or ""),
             remote_updated_at=str(data.get("remote_updated_at") or ""),
@@ -95,7 +132,9 @@ class Candidate:
     def id(self) -> str:
         if self.source == "jira":
             return f"jira:{self.key}"
-        return f"github:{self.key}"
+        if self.source == "github_issue":
+            return f"github-issue:{self.key}"
+        return f"github-pr:{self.key}"
 
 
 @dataclass
@@ -114,7 +153,10 @@ class TrackStore:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrackStore:
         items_raw = data.get("items") or {}
-        items = {k: TrackedItem.from_dict(v) for k, v in items_raw.items()}
+        items: dict[str, TrackedItem] = {}
+        for _k, v in items_raw.items():
+            item = TrackedItem.from_dict(v)
+            items[item.id] = item
         return cls(
             schema_version=int(data.get("schema_version") or STORE_SCHEMA_VERSION),
             updated_at=str(data.get("updated_at") or ""),

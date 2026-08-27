@@ -57,16 +57,86 @@ def test_blocked_any_workflow_status_when_flagged():
         assert r.action == ActionState.BLOCKED, status
 
 
+def test_blocked_via_unresolved_blocked_by_link():
+    r = classify_jira(
+        JiraIssueSnapshot(
+            key="X-1",
+            status="New",
+            assignee_is_user=True,
+            blocked_by_unresolved=True,
+        )
+    )
+    assert r.action == ActionState.BLOCKED
+    assert "jira_blocked_by_unresolved" in r.reasons
+
+
+def test_resolved_blocked_by_does_not_block():
+    r = classify_jira(
+        JiraIssueSnapshot(
+            key="X-1",
+            status="In Progress",
+            assignee_is_user=True,
+            blocked_by_unresolved=False,
+        )
+    )
+    assert r.action == ActionState.ACTIONABLE
+
+
 def test_is_jira_blocked_helpers():
     assert is_jira_blocked(JiraIssueSnapshot(key="X", status="New", flagged=True))
     assert is_jira_blocked(JiraIssueSnapshot(key="X", status="Blocked"))
     assert is_jira_blocked(JiraIssueSnapshot(key="X", status="New", labels=("Blocked",)))
+    assert is_jira_blocked(
+        JiraIssueSnapshot(key="X", status="New", blocked_by_unresolved=True)
+    )
     assert not is_jira_blocked(JiraIssueSnapshot(key="X", status="In Progress"))
 
 
 def test_review_assignee_pending():
     r = classify_jira(JiraIssueSnapshot(key="X-1", status="Review", assignee_is_user=True))
     assert r.action == ActionState.PENDING
+    assert "jira_in_review" in r.reasons
+
+
+def test_review_assignee_merged_pr_actionable():
+    r = classify_jira(
+        JiraIssueSnapshot(
+            key="X-1",
+            status="Review",
+            assignee_is_user=True,
+            linked_pr_merged=True,
+            pr_link="https://github.com/org/repo/pull/1",
+        )
+    )
+    assert r.action == ActionState.ACTIONABLE
+    assert "jira_review_pr_merged" in r.reasons
+
+
+def test_review_assignee_unmerged_pr_still_pending():
+    r = classify_jira(
+        JiraIssueSnapshot(
+            key="X-1",
+            status="Review",
+            assignee_is_user=True,
+            linked_pr_merged=False,
+            pr_link="https://github.com/org/repo/pull/1",
+        )
+    )
+    assert r.action == ActionState.PENDING
+    assert "jira_in_review" in r.reasons
+
+
+def test_review_assignee_unknown_pr_merge_pending():
+    r = classify_jira(
+        JiraIssueSnapshot(
+            key="X-1",
+            status="Review",
+            assignee_is_user=True,
+            linked_pr_merged=None,
+        )
+    )
+    assert r.action == ActionState.PENDING
+    assert "jira_in_review" in r.reasons
 
 
 def test_testing_qa_contact_actionable():

@@ -34,10 +34,18 @@ jira:
 
 pins:
   jira: []
-  github: []
+  github: []          # PRs: owner/repo#n
+  github_issues: []   # Issues: owner/repo#n
 
 done_retention_days: 7
 search_limit: 50
 
 scheduler:
   every_minutes: 15
+
+working_hours:
+  enabled: true
+  # timezone: ""          # optional IANA; empty = system local
+  days: [mon, tue, wed, thu, fri]
+  start: "08:00"
+  end: "18:00"

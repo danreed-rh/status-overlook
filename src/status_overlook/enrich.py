@@ -9,15 +9,25 @@ import subprocess
 from dataclasses import dataclass
 
 from status_overlook.classify_github import classify_github
+from status_overlook.classify_github_issue import classify_github_issue
 from status_overlook.classify_jira import classify_jira, is_jira_blocked
 from status_overlook.config import AppConfig
 from status_overlook.jira_ids import is_jira_key
-from status_overlook.models import ActionState, ClassifyConfig, GitHubPrSnapshot, JiraIssueSnapshot
+from status_overlook.models import (
+    ActionState,
+    ClassifyConfig,
+    GitHubIssueSnapshot,
+    GitHubPrSnapshot,
+    JiraIssueSnapshot,
+)
 from status_overlook.store import TrackStore, TrackedItem, _iso, _utcnow
 
 _JIRA_KEY_RE = re.compile(r"\b([A-Z][A-Z0-9]+-\d+)\b")
 # Prow/ODH style approval comment; not the label name alone
 _LGTM_COMMENT_RE = re.compile(r"(?m)(?:^|\s)/lgtm\b", re.IGNORECASE)
+_FIXES_ISSUE_RE = re.compile(
+    r"(?i)\b(?:fixes|closes|resolves)\s+(?:[a-z0-9_.-]+/[a-z0-9_.-]+)?#(\d+)\b"
+)
 
 
 def _body_has_slash_lgtm(body: str) -> bool:
@@ -155,18 +165,23 @@ def github_remote_status(snap: GitHubPrSnapshot) -> str:
     if snap.ci_failed:
         status = f"{status}+ci_fail"
     if snap.has_unresolved_reviews:
-        status = f"{status}+changes_requested"
+        status = f"{status}+unresolved_threads"
     if snap.assignee_unresolved_threads is True:
         status = f"{status}+awaiting_author"
     return status
 
 
-def assignee_has_unresolved_review_threads(
+def probe_pr_review_threads(
     repo: str, number: int, me: str
-) -> bool | None:
-    """True if ``me`` started unresolved threads; False if none; None if probe failed."""
+) -> tuple[bool | None, bool | None]:
+    """Return ``(any_unresolved, my_started_unresolved)``.
+
+    Each flag is True/False on success, or None if the GraphQL probe failed.
+    ``my_started_unresolved`` is True when ``me`` authored the first comment on
+    at least one unresolved thread (assignee-waiting-on-author signal).
+    """
     if "/" not in repo:
-        return False
+        return False, False
     owner, name = repo.split("/", 1)
     query = (
         "query($owner:String!,$name:String!,$number:Int!){"
@@ -195,53 +210,85 @@ def assignee_has_unresolved_review_threads(
         check=False,
     )
     if proc.returncode != 0:
-        return None
+        return None, None
     try:
         payload = json.loads(proc.stdout or "{}")
     except json.JSONDecodeError:
-        return None
+        return None, None
     if payload.get("errors"):
-        return None
+        return None, None
     pr = ((payload.get("data") or {}).get("repository") or {}).get("pullRequest")
     if pr is None:
-        return None
+        return None, None
     nodes = (pr.get("reviewThreads") or {}).get("nodes") or []
     me_cf = me.casefold()
+    any_unresolved = False
+    mine = False
     for thread in nodes:
         if thread.get("isResolved"):
             continue
+        any_unresolved = True
         comments = ((thread.get("comments") or {}).get("nodes")) or []
         if not comments:
             continue
         author = ((comments[0].get("author") or {}).get("login") or "").casefold()
         if author == me_cf:
-            return True
-    return False
+            mine = True
+    return any_unresolved, mine
+
+
+def assignee_has_unresolved_review_threads(
+    repo: str, number: int, me: str
+) -> bool | None:
+    """True if ``me`` started unresolved threads; False if none; None if probe failed."""
+    _any, mine = probe_pr_review_threads(repo, number, me)
+    if _any is None:
+        return None
+    return mine
 
 
 def enrich_github_pr(
     item: TrackedItem,
     identity: Identity,
     cfg: AppConfig | None = None,
-) -> tuple[GitHubPrSnapshot, str, str]:
+) -> tuple[GitHubPrSnapshot, str, str, list[str]]:
     # key is org/repo#n
     if "#" not in item.key:
         raise ValueError(f"bad github key: {item.key}")
     classify_cfg = (cfg.classify_config() if cfg else ClassifyConfig())
     repo, num_s = item.key.rsplit("#", 1)
-    data = _run_json(
-        [
-            "gh",
-            "pr",
-            "view",
-            num_s,
-            "--repo",
-            repo,
-            "--json",
-            "number,state,isDraft,mergedAt,author,assignees,labels,reviewDecision,"
-            "statusCheckRollup,title,url,comments,reviews",
-        ]
+    json_fields = (
+        "number,state,isDraft,mergedAt,author,assignees,labels,reviewDecision,"
+        "statusCheckRollup,title,url,body,comments,reviews,closingIssuesReferences"
     )
+    try:
+        data = _run_json(
+            [
+                "gh",
+                "pr",
+                "view",
+                num_s,
+                "--repo",
+                repo,
+                "--json",
+                json_fields,
+            ]
+        )
+    except RuntimeError:
+        # Older gh may lack closingIssuesReferences
+        data = _run_json(
+            [
+                "gh",
+                "pr",
+                "view",
+                num_s,
+                "--repo",
+                repo,
+                "--json",
+                "number,state,isDraft,mergedAt,author,assignees,labels,reviewDecision,"
+                "statusCheckRollup,title,url,body,comments,reviews",
+            ]
+        )
     if not isinstance(data, dict):
         raise RuntimeError(f"gh pr view returned non-object JSON for {item.key}")
     author = ((data.get("author") or {}).get("login") or "").casefold()
@@ -255,11 +302,18 @@ def enrich_github_pr(
         str(data.get("state") or "open"), data.get("mergedAt")
     )
     assignee_is_user = me in assignees
+    any_unresolved, my_unresolved = probe_pr_review_threads(
+        repo, int(data.get("number") or num_s), me
+    )
     unresolved_threads: bool | None = False
     if assignee_is_user and author != me:
-        unresolved_threads = assignee_has_unresolved_review_threads(
-            repo, int(data.get("number") or num_s), me
-        )
+        unresolved_threads = my_unresolved if any_unresolved is not None else None
+    # Author (and anyone) needs action while inline review threads remain open.
+    # reviewDecision alone misses REVIEW_REQUIRED with unresolved comments.
+    has_unresolved_reviews = (
+        review == "CHANGES_REQUESTED" or any_unresolved is True
+    )
+    linked_issue_ids = _pr_linked_issue_ids(repo, data)
     return GitHubPrSnapshot(
         repo=repo,
         number=int(data.get("number") or num_s),
@@ -269,7 +323,7 @@ def enrich_github_pr(
         author_is_user=author == me,
         assignee_is_user=assignee_is_user,
         labels=labels,
-        has_unresolved_reviews=review == "CHANGES_REQUESTED",
+        has_unresolved_reviews=has_unresolved_reviews,
         ci_failed=_ci_failed(data.get("statusCheckRollup")),
         linked_jira_blocked=False,  # filled after jira map known
         user_gave_lgtm=_user_gave_lgtm(
@@ -281,10 +335,188 @@ def enrich_github_pr(
             label_insensitive=classify_cfg.label_match_case_insensitive,
         ),
         assignee_unresolved_threads=unresolved_threads,
+    ), str(data.get("title") or item.summary), str(data.get("url") or item.url), linked_issue_ids
+
+
+def _pr_linked_issue_ids(repo: str, data: dict) -> list[str]:
+    """Store ids for issues this PR closes/links."""
+    ids: list[str] = []
+    seen: set[str] = set()
+    for ref in data.get("closingIssuesReferences") or []:
+        number = ref.get("number")
+        if number is None:
+            continue
+        iid = f"github-issue:{repo}#{int(number)}"
+        if iid not in seen:
+            seen.add(iid)
+            ids.append(iid)
+    body = str(data.get("body") or "")
+    for match in _FIXES_ISSUE_RE.finditer(body):
+        iid = f"github-issue:{repo}#{int(match.group(1))}"
+        if iid not in seen:
+            seen.add(iid)
+            ids.append(iid)
+    return ids
+
+
+def _issue_linked_prs(repo: str, number: int) -> list[dict] | None:
+    """Best-effort linked PRs via GraphQL. None = probe failed; [] = none found."""
+    if "/" not in repo:
+        return None
+    owner, name = repo.split("/", 1)
+    query = """
+    query($owner:String!,$name:String!,$number:Int!) {
+      repository(owner:$owner, name:$name) {
+        issue(number:$number) {
+          timelineItems(last: 40, itemTypes: [CROSS_REFERENCED_EVENT, CONNECTED_EVENT]) {
+            nodes {
+              __typename
+              ... on CrossReferencedEvent {
+                source {
+                  ... on PullRequest {
+                    number
+                    url
+                    state
+                    merged
+                  }
+                }
+              }
+              ... on ConnectedEvent {
+                subject {
+                  ... on PullRequest {
+                    number
+                    url
+                    state
+                    merged
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    proc = subprocess.run(
+        [
+            "gh",
+            "api",
+            "graphql",
+            "-f",
+            f"query={query}",
+            "-F",
+            f"owner={owner}",
+            "-F",
+            f"name={name}",
+            "-F",
+            f"number={number}",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return None
+    try:
+        payload = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        return None
+    if payload.get("errors"):
+        return None
+    issue = ((payload.get("data") or {}).get("repository") or {}).get("issue")
+    if issue is None:
+        return None
+    nodes = ((issue.get("timelineItems") or {}).get("nodes")) or []
+    prs: dict[int, dict] = {}
+    for node in nodes:
+        pr = None
+        if node.get("__typename") == "CrossReferencedEvent":
+            pr = node.get("source")
+        elif node.get("__typename") == "ConnectedEvent":
+            pr = node.get("subject")
+        if not isinstance(pr, dict) or pr.get("number") is None:
+            continue
+        n = int(pr["number"])
+        prs[n] = {
+            "number": n,
+            "url": str(pr.get("url") or f"https://github.com/{repo}/pull/{n}"),
+            "state": str(pr.get("state") or "").upper(),
+            "merged": bool(pr.get("merged")),
+        }
+    return list(prs.values())
+
+
+def enrich_github_issue(
+    item: TrackedItem,
+    identity: Identity,
+) -> tuple[GitHubIssueSnapshot, str, str]:
+    """Enrich a GitHub Issue. key is org/repo#n."""
+    if "#" not in item.key:
+        raise ValueError(f"bad github_issue key: {item.key}")
+    repo, num_s = item.key.rsplit("#", 1)
+    number = int(num_s)
+    data = _run_json(
+        [
+            "gh",
+            "issue",
+            "view",
+            num_s,
+            "--repo",
+            repo,
+            "--json",
+            "number,state,title,url,assignees,labels",
+        ]
+    )
+    if not isinstance(data, dict):
+        raise RuntimeError(f"gh issue view returned non-object JSON for {item.key}")
+    me = identity.github_login.casefold()
+    assignees = {
+        (a.get("login") or "").casefold() for a in (data.get("assignees") or [])
+    }
+    labels = tuple(x.get("name") or "" for x in (data.get("labels") or []))
+    state = str(data.get("state") or "OPEN").casefold()
+    if state == "open":
+        snap_state = "open"
+    else:
+        snap_state = "closed"
+
+    linked = _issue_linked_prs(repo, number)
+    linked_pr_open = False
+    linked_pr_merged: bool | None = None
+    pr_link: str | None = None
+    if linked is None:
+        linked_pr_merged = None
+    elif linked:
+        open_prs = [
+            p
+            for p in linked
+            if str(p.get("state") or "").upper() == "OPEN" and not p.get("merged")
+        ]
+        merged_prs = [p for p in linked if p.get("merged")]
+        linked_pr_open = bool(open_prs)
+        linked_pr_merged = bool(merged_prs) and not open_prs
+        if open_prs:
+            pr_link = str(open_prs[0].get("url") or "") or None
+        elif merged_prs:
+            pr_link = str(merged_prs[0].get("url") or "") or None
+    else:
+        linked_pr_merged = False
+
+    return GitHubIssueSnapshot(
+        repo=repo,
+        number=int(data.get("number") or number),
+        state=snap_state,
+        assignee_is_user=me in assignees,
+        labels=labels,
+        linked_pr_open=linked_pr_open,
+        linked_pr_merged=linked_pr_merged,
+        linked_jira_blocked=False,
+        pr_link=pr_link,
     ), str(data.get("title") or item.summary), str(data.get("url") or item.url)
 
 
 def _jira_fields_list(cfg: AppConfig) -> str:
+    # Note: acli search rejects `issuelinks`; links are loaded via workitem view.
     fields = ["key", "summary", "status", "assignee", "labels", "issuetype"]
     if cfg.jira_qa_contact_field:
         fields.append(cfg.jira_qa_contact_field)
@@ -348,11 +580,61 @@ def _extract_pr_link(value: object) -> str | None:
     if value is None:
         return None
     if isinstance(value, str) and value.strip():
-        return value.strip()
+        text = value.strip()
+        m = re.search(r"https://github\.com/[^\"\s]+/pull/\d+", text)
+        return m.group(0) if m else text
     # ADF-ish: dig for urls
     text = json.dumps(value)
     m = re.search(r"https://github\.com/[^\"\s]+/pull/\d+", text)
     return m.group(0) if m else None
+
+
+_GH_PR_URL_RE = re.compile(
+    r"https?://(?:www\.)?github\.com/([^/]+/[^/]+)/pull/(\d+)",
+    re.IGNORECASE,
+)
+
+
+def parse_github_pr_url(url: str) -> tuple[str, int] | None:
+    """Return (owner/repo, number) from a GitHub PR URL, else None."""
+    m = _GH_PR_URL_RE.search(url or "")
+    if not m:
+        return None
+    return m.group(1), int(m.group(2))
+
+
+def fetch_github_pr_merged(pr_url: str) -> bool | None:
+    """True if PR merged; False if open/closed-unmerged; None if probe failed."""
+    parsed = parse_github_pr_url(pr_url)
+    if not parsed:
+        return None
+    repo, number = parsed
+    proc = subprocess.run(
+        [
+            "gh",
+            "pr",
+            "view",
+            str(number),
+            "--repo",
+            repo,
+            "--json",
+            "state,mergedAt",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    if data.get("mergedAt"):
+        return True
+    return str(data.get("state") or "").upper() == "MERGED"
 
 
 def _flagged_from_fields(fields: dict) -> bool:
@@ -377,6 +659,68 @@ def _flagged_from_fields(fields: dict) -> bool:
     return False
 
 
+def _is_blocked_by_link(link: dict) -> bool:
+    """True when this issue is the inward side of a Blocks / is-blocked-by link."""
+    if not isinstance(link, dict) or "inwardIssue" not in link:
+        return False
+    link_type = link.get("type") or {}
+    if not isinstance(link_type, dict):
+        return False
+    inward = str(link_type.get("inward") or "").casefold()
+    name = str(link_type.get("name") or "").casefold()
+    return inward == "is blocked by" or name == "blocks"
+
+
+def blocked_by_unresolved_from_fields(fields: dict, cfg: ClassifyConfig) -> bool:
+    """True if any 'is blocked by' linked issue is not terminal (or status missing)."""
+    links = fields.get("issuelinks") or fields.get("issueLinks") or []
+    if not isinstance(links, list):
+        return False
+    for link in links:
+        if not isinstance(link, dict) or not _is_blocked_by_link(link):
+            continue
+        blocker = link.get("inwardIssue") or {}
+        if not isinstance(blocker, dict):
+            continue
+        blocker_fields = blocker.get("fields") or {}
+        if not isinstance(blocker_fields, dict):
+            # Nested status missing — fail closed (treat as still blocking)
+            return True
+        status = blocker_fields.get("status")
+        if status is None:
+            return True
+        if not _status_is_terminal(status, cfg):
+            return True
+    return False
+
+
+def fetch_jira_issuelinks(key: str) -> list:
+    """Load issuelinks via acli view (search forbids the field)."""
+    if not is_jira_key(key):
+        raise ValueError(f"invalid jira key: {key}")
+    cmd = [
+        "acli",
+        "jira",
+        "workitem",
+        "view",
+        key,
+        "--fields",
+        "issuelinks",
+        "--json",
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stderr or proc.stdout or "acli view issuelinks failed").strip())
+    data = json.loads(proc.stdout or "{}")
+    if not isinstance(data, dict):
+        return []
+    fields = data.get("fields") or {}
+    if not isinstance(fields, dict):
+        return []
+    links = fields.get("issuelinks") or fields.get("issueLinks") or []
+    return links if isinstance(links, list) else []
+
+
 def enrich_jira_issues(
     keys: list[str],
     *,
@@ -393,6 +737,7 @@ def enrich_jira_issues(
     # Batch in chunks of 40
     out: dict[str, tuple[JiraIssueSnapshot, str, str]] = {}
     fields = _jira_fields_list(cfg)
+    classify_cfg = cfg.classify_config()
     for i in range(0, len(valid_keys), 40):
         chunk = valid_keys[i : i + 40]
         jql = "key in (" + ", ".join(chunk) + ")"
@@ -461,8 +806,32 @@ def enrich_jira_issues(
             )
             out[key] = (snap, summary, url)
 
+    # Issuelinks: acli search rejects the field; one view per issue
+    for key, (snap, summary, url) in list(out.items()):
+        try:
+            links = fetch_jira_issuelinks(key)
+            snap.blocked_by_unresolved = blocked_by_unresolved_from_fields(
+                {"issuelinks": links}, classify_cfg
+            )
+        except (RuntimeError, json.JSONDecodeError, ValueError) as exc:
+            print(f"Warning: issuelinks for {key}: {exc}")
+            snap.blocked_by_unresolved = False
+        out[key] = (snap, summary, url)
+
+    # Review + Git PR field: probe whether linked PR is merged (gh)
+    for key, (snap, summary, url) in list(out.items()):
+        if not classify_cfg.status_in(snap.status, classify_cfg.status_review):
+            continue
+        if not snap.pr_link or not parse_github_pr_url(snap.pr_link):
+            continue
+        try:
+            snap.linked_pr_merged = fetch_github_pr_merged(snap.pr_link)
+        except (RuntimeError, ValueError) as exc:
+            print(f"Warning: PR merge probe for {key}: {exc}")
+            snap.linked_pr_merged = None
+        out[key] = (snap, summary, url)
+
     # Fill epic child rollups (one search per epic)
-    classify_cfg = cfg.classify_config()
     for key, (snap, summary, url) in list(out.items()):
         if snap.issue_type.casefold() != "epic":
             continue
@@ -485,6 +854,9 @@ def apply_classification_to_item(
     reasons: tuple[str, ...],
     summary: str = "",
     url: str = "",
+    issue_type: str | None = None,
+    pr_link: str | None = None,
+    linked_issue_ids: list[str] | None = None,
     now_s: str | None = None,
 ) -> bool:
     """Update item; return True if state fingerprint changed."""
@@ -493,6 +865,12 @@ def apply_classification_to_item(
         item.summary = summary
     if url:
         item.url = url
+    if issue_type is not None:
+        item.issue_type = issue_type
+    if pr_link is not None:
+        item.pr_link = pr_link
+    if linked_issue_ids is not None:
+        item.linked_issue_ids = list(linked_issue_ids)
     item.remote_status = remote_status
     item.action = action.value
     item.blocked = blocked
@@ -527,7 +905,8 @@ def enrich_and_classify_store(store: TrackStore, cfg: AppConfig) -> tuple[int, i
     classify_cfg = cfg.classify_config()
 
     jira_items = [i for i in store.items.values() if i.source == "jira"]
-    gh_items = [i for i in store.items.values() if i.source == "github"]
+    gh_pr_items = [i for i in store.items.values() if i.source == "github_pr"]
+    gh_issue_items = [i for i in store.items.values() if i.source == "github_issue"]
 
     jira_map = enrich_jira_issues(
         [i.key for i in jira_items],
@@ -572,16 +951,18 @@ def enrich_and_classify_store(store: TrackStore, cfg: AppConfig) -> tuple[int, i
             reasons=result.reasons,
             summary=summary,
             url=url,
+            issue_type=snap.issue_type,
+            pr_link=snap.pr_link or "",
             now_s=now_s,
         )
         if changed:
             changes += 1
 
-    for item in gh_items:
+    for item in gh_pr_items:
         try:
-            snap, title, url = enrich_github_pr(item, identity, cfg)
+            snap, title, url, linked_issue_ids = enrich_github_pr(item, identity, cfg)
         except RuntimeError as exc:
-            print(f"Skipping GitHub enrich for {item.key}: {exc}")
+            print(f"Skipping GitHub PR enrich for {item.key}: {exc}")
             continue
         classified += 1
         keys_in_title = set(_JIRA_KEY_RE.findall(title))
@@ -612,6 +993,41 @@ def enrich_and_classify_store(store: TrackStore, cfg: AppConfig) -> tuple[int, i
             reasons=result.reasons,
             summary=title,
             url=url,
+            linked_issue_ids=linked_issue_ids,
+            now_s=now_s,
+        )
+        if changed:
+            changes += 1
+
+    for item in gh_issue_items:
+        try:
+            snap, title, url = enrich_github_issue(item, identity)
+        except RuntimeError as exc:
+            print(f"Skipping GitHub Issue enrich for {item.key}: {exc}")
+            continue
+        classified += 1
+        keys_in_title = set(_JIRA_KEY_RE.findall(title))
+        snap.linked_jira_blocked = bool(keys_in_title & blocked_jira_keys)
+        result = classify_github_issue(snap, classify_cfg)
+        if result.action == ActionState.DONE or (
+            result.action == ActionState.IGNORE and not item.pinned
+        ):
+            lifecycle = "done"
+        elif result.should_track:
+            lifecycle = "active"
+        else:
+            lifecycle = item.lifecycle
+        remote_status = snap.state
+        changed = apply_classification_to_item(
+            item,
+            action=result.action,
+            lifecycle=lifecycle,
+            remote_status=remote_status,
+            blocked=result.blocked,
+            reasons=result.reasons,
+            summary=title,
+            url=url,
+            pr_link=snap.pr_link or "",
             now_s=now_s,
         )
         if changed:

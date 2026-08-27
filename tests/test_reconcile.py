@@ -19,11 +19,11 @@ def test_reconcile_adds_and_finishes():
     )
     candidates = [
         Candidate(source="jira", key="NEW-2", summary="hello", remote_status="In Progress"),
-        Candidate(source="github", key="org/repo#3", summary="pr", remote_status="open"),
+        Candidate(source="github_pr", key="org/repo#3", summary="pr", remote_status="open"),
     ]
     store, stats = reconcile(store, candidates, now=now, retention_days=7)
     assert "jira:NEW-2" in store.items
-    assert "github:org/repo#3" in store.items
+    assert "github-pr:org/repo#3" in store.items
     assert "jira:NEW-2" in stats.added
     assert store.items["jira:OLD-1"].lifecycle == "done"
     assert "jira:OLD-1" in stats.finished

@@ -32,9 +32,22 @@ def _pr_candidate(row: dict) -> Candidate:
     number = int(row["number"])
     key = f"{repo}#{number}"
     return Candidate(
-        source="github",
+        source="github_pr",
         key=key,
         url=str(row.get("url") or f"https://github.com/{repo}/pull/{number}"),
+        summary=str(row.get("title") or ""),
+        remote_status="open",
+    )
+
+
+def _issue_candidate(row: dict) -> Candidate:
+    repo = (row.get("repository") or {}).get("nameWithOwner") or "unknown/unknown"
+    number = int(row["number"])
+    key = f"{repo}#{number}"
+    return Candidate(
+        source="github_issue",
+        key=key,
+        url=str(row.get("url") or f"https://github.com/{repo}/issues/{number}"),
         summary=str(row.get("title") or ""),
         remote_status="open",
     )
@@ -71,5 +84,33 @@ def fetch_open_prs(*, limit: int = 50) -> list[Candidate]:
         print(
             f"Warning: GitHub PR search hit limit={limit}; "
             "raise search_limit in config or some PRs may look finished."
+        )
+    return list(by_id.values())
+
+
+def fetch_assigned_issues(*, limit: int = 50) -> list[Candidate]:
+    """Open Issues assigned to the authenticated user (not author-only)."""
+    fields = "number,url,title,repository,updatedAt"
+    # Trailing is:issue keeps PRs out of issue search results.
+    rows = _gh_json(
+        [
+            "search",
+            "issues",
+            "--assignee=@me",
+            "--state=open",
+            f"--limit={limit}",
+            f"--json={fields}",
+            "--",
+            "is:issue",
+        ]
+    )
+    by_id: dict[str, Candidate] = {}
+    for row in rows:
+        cand = _issue_candidate(row)
+        by_id[cand.id] = cand
+    if len(rows) >= limit:
+        print(
+            f"Warning: GitHub Issue search hit limit={limit}; "
+            "raise search_limit in config or some issues may look finished."
         )
     return list(by_id.values())

@@ -22,8 +22,62 @@ User-domain only — no `/Library` system agents in v1.
 | Config | `~/.config/status-overlook/` |
 | Data | `~/.local/share/status-overlook/` |
 | Cache | `~/.cache/status-overlook/` |
+| Logs | `~/.local/state/status-overlook/log/` |
+| Optional scheduler | `~/.config/systemd/user/status-overlook.sync.{service,timer}` |
 
 `XDG_*` env vars override when set. `status-overlook paths` prints the resolved list.
+
+### Windows
+
+| Kind | Path |
+|------|------|
+| Config / store | `%LOCALAPPDATA%\status-overlook\` |
+| Digests | `%LOCALAPPDATA%\status-overlook\Cache\` |
+| Logs | `%LOCALAPPDATA%\status-overlook\Logs\` |
+| Optional scheduler | Task Scheduler `StatusOverlook\Sync` (+ XML under `...\scheduler\`) |
+
+## Schedulers
+
+`status-overlook install-scheduler --every 15m` installs a **user** job that runs `status-overlook run`:
+
+- macOS — LaunchAgent
+- Linux — systemd user timer
+- Windows — Task Scheduler
+
+Example unit/plist/XML templates also live under [`contrib/`](../contrib/). Off-hours behavior (below) applies to scheduler-triggered `run` as well as UI auto-refresh.
+
+## Working hours (quiet mode)
+
+Optional `working_hours` in `config.yaml` limits when `status-overlook run` calls `gh` / `acli`, and when `serve` stays up.
+
+**Defaults** (when the block is present or written by `init`):
+
+| Field | Default |
+|-------|---------|
+| `enabled` | `true` |
+| `days` | Monday–Friday |
+| `start` / `end` | `08:00` / `18:00` (end exclusive — 18:00 is off-hours) |
+| `timezone` | System local (optional IANA override, e.g. `America/New_York`) |
+
+**Existing installs** without a `working_hours` key are unchanged (feature disabled).
+
+```yaml
+working_hours:
+  enabled: true
+  days: [mon, tue, wed, thu, fri]
+  start: "08:00"
+  end: "18:00"
+```
+
+| Command | Off-hours behavior |
+|---------|-------------------|
+| `status-overlook run` | Exits 0 immediately (no gh/acli) |
+| `status-overlook run --force` | Runs anyway |
+| `status-overlook serve` | Refuses to start |
+| `status-overlook serve --ignore-working-hours` | Starts and stays up |
+| `serve` (while running) | Shuts down at end of window / on weekends |
+
+Reading digests (`show`, `/api/digest`) is always local — not gated.
 
 ## CLIs
 
@@ -47,3 +101,49 @@ An issue is **blocked** if **any** of these is true:
 1. **Status** name is in `status_blocked` (default: `Blocked`)
 2. **Label** is in `blocked_labels` (default: `blocked`, case-insensitive)
 3. **Flagged** impediment is set (Jira Software flag; providers map this to `flagged: true`)
+4. **Issue link** *is blocked by* points at an issue that is **not** terminal (status category `done`, or status name in `status_done`). Resolved/Closed blockers do not keep the issue blocked. Outward *blocks* links are ignored (those mean *this* issue blocks someone else).
+
+   Providers load links with `acli jira workitem view … --fields issuelinks` (acli **search** rejects `issuelinks`).
+
+## Jira Review + merged PR
+
+When status is in `status_review` (default: `Review`, …), the assignee is you, and the **Git Pull Request** field (`pr_link_field`) points at a **merged** GitHub PR, classification is **actionable** (`jira_review_pr_merged`) instead of pending.
+
+Meaning: code is in; you still need to add testing instructions and move to Testing, or resolve if testing is not required.
+
+Probe uses `gh pr view` only for Review issues that have a parseable GitHub PR URL. Missing/unmerged/unknown PR → stay **pending**.
+
+## Epics in digests / show
+
+Jira items with issue type **Epic** show an `[Epic]` tag and sort to the **bottom** of Actionable / Pending / Blocked (still newest-first within the epic group). Recently done is unchanged. Requires a sync/enrich so `issue_type` is stored.
+
+## Jira + PR grouping (show / digest)
+
+Active Actionable / Pending / Blocked entries **collapse** linked Jira + GitHub PR pairs into one row:
+
+1. **Pair** if Jira `pr_link` matches a tracked PR, or the PR summary contains a tracked Jira key.
+2. **Section** = best action among members: `actionable` > `pending` > `blocked`.
+3. **Primary** (key/url shown) = member with best action; tie-break prefers an **open** GitHub PR, else Jira.
+4. **Secondary** appears as `↔ #8787` or `↔ RHOAIENG-76231`.
+
+Recently done is not grouped. JSON digest keeps all items and adds `group_primary_id` / `linked_ids`.
+
+## Roadmap (not in this release)
+
+- **Deferred:** team multi-user board, ROSA/cluster hosting
+
+## Local UI (`serve`)
+
+`status-overlook serve [--port 8765] [--open]` starts a **localhost-only** page:
+
+- Views: Actionable, All active, **Everything** (active + recently done), Pending, Blocked, Recently done
+- Source filter: Jira + GitHub / GitHub (PRs + Issues) / PRs / Issues / Jira
+- Refresh now + optional auto-refresh (1m / 5m / 15m): each tick runs the full `run` pipeline and **reloads the list** when that run finishes. OS scheduler updates digests on disk but does not refresh an open browser tab by itself.
+- Mark all read
+- Dark UI with colorblind-safe status accents; status also shown as labeled pills (`! Actionable`, etc.)
+
+### GitHub Issues
+
+Discovery uses `gh search issues --assignee=@me --state=open -- is:issue` (assignee only; not author). Pins: `pins.github_issues` → `github-issue:owner/repo#n`. PR pins stay under `pins.github` → `github-pr:…`. `skip_github` skips both PRs and Issues.
+
+Agents should still use digest files / `show --plain`, not the browser UI.

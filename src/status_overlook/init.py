@@ -6,7 +6,7 @@ import json
 import re
 import subprocess
 
-from status_overlook.config import AppConfig, load_config, save_config
+from status_overlook.config import AppConfig, WorkingHoursConfig, load_config, save_config
 from status_overlook.doctor import check_acli, check_gh, print_doctor
 from status_overlook.fsutil import ensure_private_dir
 from status_overlook.jira_ids import qa_field_to_jql
@@ -122,6 +122,10 @@ def run_init(*, non_interactive: bool = False, force: bool = False) -> int:
     if qa and qa_field_to_jql(qa) is None:
         print(f"Warning: QA field {qa!r} is not customfield_<digits>; discovery will skip it.")
 
+    wh = existing.working_hours
+    if not path.is_file() or existing.raw.get("working_hours") is None:
+        wh = WorkingHoursConfig()
+
     cfg = AppConfig(
         github_login=login,
         jira_site=site.strip().removeprefix("https://").removesuffix("/"),
@@ -139,6 +143,7 @@ def run_init(*, non_interactive: bool = False, force: bool = False) -> int:
         pins_github=existing.pins_github,
         done_retention_days=existing.done_retention_days,
         search_limit=existing.search_limit,
+        working_hours=wh,
     )
 
     ensure_private_dir(data_dir())

@@ -12,9 +12,11 @@ from status_overlook.models import (
 
 
 def is_jira_blocked(issue: JiraIssueSnapshot, cfg: ClassifyConfig | None = None) -> bool:
-    """Blocked if status, label, or Flagged impediment matches (any one is enough)."""
+    """Blocked if status, label, Flagged, or unresolved is-blocked-by link (any one)."""
     cfg = cfg or ClassifyConfig()
     if issue.flagged:
+        return True
+    if issue.blocked_by_unresolved:
         return True
     if cfg.status_in(issue.status, cfg.status_blocked):
         return True
@@ -34,11 +36,12 @@ def classify_jira(
     """Classify a Jira issue for track lifecycle and action state.
 
     - Done statuses → done
-    - Blocked (status / label / Flagged) at any non-done status → blocked
+    - Blocked (status / label / Flagged / unresolved is-blocked-by) → blocked
     - Epic + assignee: pending until all children are done; then actionable
     - Testing + QA contact → actionable
     - Testing + assignee only → untracked (not actionable, not pending)
-    - Review + assignee → pending
+    - Review + assignee + linked PR merged → actionable (move to Testing / resolve)
+    - Review + assignee (otherwise) → pending
     - Active + assignee → actionable
     """
     cfg = cfg or ClassifyConfig()
@@ -57,6 +60,8 @@ def classify_jira(
     if blocked and (issue.assignee_is_user or issue.qa_contact_is_user):
         if issue.flagged:
             reasons.append("jira_flagged")
+        if issue.blocked_by_unresolved:
+            reasons.append("jira_blocked_by_unresolved")
         if cfg.status_in(issue.status, cfg.status_blocked):
             reasons.append("jira_status_blocked")
         if cfg.label_in(issue.labels, cfg.blocked_labels):
@@ -126,6 +131,13 @@ def classify_jira(
         )
 
     if in_review:
+        if issue.linked_pr_merged is True:
+            return ClassificationResult(
+                lifecycle=Lifecycle.ACTIVE,
+                action=ActionState.ACTIONABLE,
+                reasons=("jira_review_pr_merged",),
+                blocked=False,
+            )
         reasons.append("jira_in_review")
         return ClassificationResult(
             lifecycle=Lifecycle.ACTIVE,

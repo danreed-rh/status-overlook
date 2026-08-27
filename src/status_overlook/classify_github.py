@@ -35,7 +35,7 @@ def classify_github(
         - gave /lgtm or lgtm label → pending
         - otherwise → actionable (need to review / re-review)
     - open + author (and other involved paths):
-        - unresolved reviews or CI failures → actionable
+        - unresolved review threads (or CHANGES_REQUESTED) or CI failures → actionable
         - author + actionable label (default: lgtm) → actionable (ready to merge)
         - author draft → actionable
         - otherwise → pending
