@@ -4,5 +4,7 @@ Documentation=https://github.com/danreed-rh/status-overlook
 
 [Service]
 Type=oneshot
+# Prefer: status-overlook install-scheduler
+# If ExecStart fails, replace with the output of: command -v status-overlook
 ExecStart=status-overlook run
-Environment=PATH=/opt/homebrew/bin:/usr/local/bin:/Users/dareed/.local/bin:/usr/bin:/bin:/opt/homebrew/sbin:/System/Cryptexes/App/usr/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/usr/local/go/bin:/usr/local/munki:/Applications/Cursor.app/Contents/Resources/app/node_modules/@vscode/ripgrep/bin:/Users/dareed/.cargo/bin
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin

@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark light;
   --bg: #0f1115;
   --surface: #1a1e26;
   --fg: #f1f3f5;
@@ -11,7 +12,26 @@
   --blocked: #e06900;
   --done: #b0b8c0;
   --focus: #ffffff;
-  font-family: "Segoe UI", system-ui, sans-serif;
+  --btn: #2a6fbf;
+  font-family: system-ui, "Segoe UI", "Ubuntu", "Cantarell", "Noto Sans", sans-serif;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f4f6f8;
+    --surface: #ffffff;
+    --fg: #1a1e26;
+    --muted: #5c6570;
+    --line: #c5ccd6;
+    --accent: #005ea8;
+    --unread: #8a5a00;
+    --actionable: #8a6a00;
+    --pending: #0072b2;
+    --blocked: #c44e00;
+    --done: #5c6570;
+    --focus: #000000;
+    --btn: #005ea8;
+  }
 }
 
 * { box-sizing: border-box; }
@@ -88,14 +108,14 @@ select, button {
 select:focus-visible,
 button:focus-visible,
 input:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
 button {
   cursor: pointer;
-  background: #2a6fbf;
-  border-color: #2a6fbf;
+  background: var(--btn);
+  border-color: var(--btn);
   color: #fff;
   text-transform: none;
   letter-spacing: 0;
@@ -115,6 +135,7 @@ button:disabled {
 .status-line {
   margin: 0;
   padding: 0.5rem 1.5rem;
+  background: var(--surface);
   background: color-mix(in srgb, var(--actionable) 14%, var(--surface));
   border-bottom: 1px solid var(--line);
   color: var(--fg);
@@ -178,27 +199,32 @@ main {
   margin-bottom: 1.75rem;
   padding-left: 0.75rem;
   border-left: 4px solid var(--line);
+  background: var(--surface);
   background: color-mix(in srgb, var(--surface) 55%, transparent);
   border-radius: 0 4px 4px 0;
 }
 
 .section[data-section="actionable"] {
   border-left-color: var(--actionable);
+  background: var(--surface);
   background: color-mix(in srgb, var(--actionable) 8%, transparent);
 }
 
 .section[data-section="pending"] {
   border-left-color: var(--pending);
+  background: var(--surface);
   background: color-mix(in srgb, var(--pending) 8%, transparent);
 }
 
 .section[data-section="blocked"] {
   border-left-color: var(--blocked);
+  background: var(--surface);
   background: color-mix(in srgb, var(--blocked) 8%, transparent);
 }
 
 .section[data-section="done"] {
   border-left-color: var(--done);
+  background: var(--surface);
   background: color-mix(in srgb, var(--done) 8%, transparent);
 }
 
@@ -209,27 +235,32 @@ main {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--muted);
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  border-bottom: 1px solid var(--line);
+  border-bottom-color: color-mix(in srgb, var(--line) 80%, transparent);
   padding: 0.5rem 0.5rem 0.35rem 0;
 }
 
 .section[data-section="actionable"] h2 {
   color: var(--actionable);
+  border-bottom-color: var(--actionable);
   border-bottom-color: color-mix(in srgb, var(--actionable) 40%, transparent);
 }
 
 .section[data-section="pending"] h2 {
   color: var(--pending);
+  border-bottom-color: var(--pending);
   border-bottom-color: color-mix(in srgb, var(--pending) 40%, transparent);
 }
 
 .section[data-section="blocked"] h2 {
   color: var(--blocked);
+  border-bottom-color: var(--blocked);
   border-bottom-color: color-mix(in srgb, var(--blocked) 40%, transparent);
 }
 
 .section[data-section="done"] h2 {
   color: var(--done);
+  border-bottom-color: var(--done);
   border-bottom-color: color-mix(in srgb, var(--done) 40%, transparent);
 }
 
@@ -292,21 +323,25 @@ main {
 
 .pill.pill-actionable {
   border-color: var(--actionable);
+  background: var(--surface);
   background: color-mix(in srgb, var(--actionable) 18%, var(--surface));
 }
 
 .pill.pill-pending {
   border-color: var(--pending);
+  background: var(--surface);
   background: color-mix(in srgb, var(--pending) 18%, var(--surface));
 }
 
 .pill.pill-blocked {
   border-color: var(--blocked);
+  background: var(--surface);
   background: color-mix(in srgb, var(--blocked) 18%, var(--surface));
 }
 
 .pill.pill-done {
   border-color: var(--done);
+  background: var(--surface);
   background: color-mix(in srgb, var(--done) 18%, var(--surface));
 }
 
@@ -346,4 +381,27 @@ footer code {
 @media (max-width: 640px) {
   .top { padding: 1rem; }
   main { padding: 1rem; }
+}
+
+@media (forced-colors: active) {
+  .section {
+    border-left-width: 6px;
+    background: Canvas;
+  }
+
+  .pill {
+    border-width: 2px;
+  }
+
+  button,
+  select {
+    border-width: 2px;
+  }
+
+  select:focus-visible,
+  button:focus-visible,
+  input:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
 }

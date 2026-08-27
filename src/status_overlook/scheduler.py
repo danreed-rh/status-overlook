@@ -52,27 +52,55 @@ def resolve_program() -> list[str]:
     return [sys.executable, "-m", "status_overlook", "run"]
 
 
-def _path_env() -> str:
-    """PATH for scheduled jobs so gh/acli resolve."""
-    if _is_windows():
-        parts = [
-            str(Path(sys.executable).parent),
-            os.environ.get("Path") or os.environ.get("PATH") or "",
+def _unix_path_env() -> str:
+    """PATH for LaunchAgent / systemd so gh and acli resolve."""
+    parts: list[str] = []
+    if sys.platform == "darwin":
+        parts.extend(["/opt/homebrew/bin", "/usr/local/bin"])
+    else:
+        parts.append("/usr/local/bin")
+    parts.extend(
+        [
+            str(Path.home() / ".local" / "bin"),
+            "/usr/bin",
+            "/bin",
         ]
-        return ";".join(p for p in parts if p)
-
-    parts = [
-        "/opt/homebrew/bin",
-        "/usr/local/bin",
-        str(Path.home() / ".local" / "bin"),
-        "/usr/bin",
-        "/bin",
-    ]
+    )
     existing = os.environ.get("PATH", "")
     for p in existing.split(":"):
         if p and p not in parts:
             parts.append(p)
-    return ":".join(parts)
+    return _sanitize_unix_path(":".join(parts))
+
+
+def _sanitize_unix_path(raw: str) -> str:
+    out: list[str] = []
+    for p in raw.split(":"):
+        if not p or any(c in p for c in "\n\r%"):
+            continue
+        out.append(p)
+    return ":".join(out)
+
+
+def _windows_path_env() -> str:
+    parts = [
+        str(Path(sys.executable).parent),
+        os.environ.get("Path") or os.environ.get("PATH") or "",
+    ]
+    raw = ";".join(p for p in parts if p)
+    out: list[str] = []
+    for p in raw.split(";"):
+        if not p or any(c in p for c in "\n\r&|<>^%"):
+            continue
+        out.append(p)
+    return ";".join(out)
+
+
+def _path_env() -> str:
+    """PATH for scheduled jobs so gh/acli resolve."""
+    if _is_windows():
+        return _windows_path_env()
+    return _unix_path_env()
 
 
 def launchd_path_env() -> str:
@@ -108,7 +136,7 @@ def render_plist(*, every_seconds: int, program: list[str] | None = None) -> str
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>{_xml_escape(_path_env())}</string>
+    <string>{_xml_escape(_unix_path_env())}</string>
   </dict>
 </dict>
 </plist>
@@ -126,7 +154,7 @@ Documentation=https://github.com/danreed-rh/status-overlook
 [Service]
 Type=oneshot
 ExecStart={exec_start}
-Environment=PATH={_path_env()}
+Environment="PATH={_unix_path_env().replace('"', "")}"
 """
 
 
@@ -168,6 +196,9 @@ def render_windows_task_xml(
         interval = f"PT{minutes // 60}H"
     else:
         interval = f"PT{minutes}M"
+    path_env = _windows_path_env()
+    quoted_exe = exe if exe.startswith('"') else f'"{exe}"'
+    cmd_args = f'/c set "PATH={path_env}" && {quoted_exe} {args}'.strip()
     return f"""<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
@@ -177,6 +208,7 @@ def render_windows_task_xml(
     <TimeTrigger>
       <Repetition>
         <Interval>{interval}</Interval>
+        <Duration>P365D</Duration>
         <StopAtDurationEnd>false</StopAtDurationEnd>
       </Repetition>
       <StartBoundary>2020-01-01T00:00:00</StartBoundary>
@@ -203,8 +235,8 @@ def render_windows_task_xml(
   </Settings>
   <Actions Context="Author">
     <Exec>
-      <Command>{_xml_escape(exe)}</Command>
-      <Arguments>{_xml_escape(args)}</Arguments>
+      <Command>cmd.exe</Command>
+      <Arguments>{_xml_escape(cmd_args)}</Arguments>
     </Exec>
   </Actions>
 </Task>
@@ -353,6 +385,8 @@ def _install_linux(every_seconds: int) -> int:
     print(f"  {timer}")
     print(f"  {service}")
     print(f"Status: systemctl --user status {SYSTEMD_UNIT}.timer")
+    print("Note: systemd --user timers run while you are logged in.")
+    print('  After logout/reboot, keep them running with: loginctl enable-linger "$USER"')
     return 0
 
 
@@ -431,6 +465,8 @@ def _install_windows(every_seconds: int) -> int:
             return 1
     print(f"Installed Windows task {WINDOWS_TASK_NAME} every {every_seconds}s")
     print(f"XML: {xml_path}")
+    print("Note: the task uses InteractiveToken — it runs while you are logged in.")
+    print("  If it fails to start, set Command to the full path from: where status-overlook")
     return 0
 
 

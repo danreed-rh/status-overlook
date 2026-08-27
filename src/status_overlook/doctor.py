@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 
 from status_overlook.config import AppConfig, load_config
@@ -23,13 +24,54 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, capture_output=True, text=True, check=False)
 
 
+def gh_install_hint(*, platform: str | None = None) -> str:
+    plat = platform or sys.platform
+    if plat == "darwin":
+        extra = "e.g. brew install gh"
+    elif plat.startswith("linux"):
+        extra = "e.g. sudo apt install gh  or  sudo dnf install gh"
+    elif plat == "win32":
+        extra = "e.g. winget install GitHub.cli"
+    else:
+        extra = "see the install page for your OS"
+    return f"Install GitHub CLI: https://cli.github.com/ — {extra}"
+
+
+def acli_install_hint(*, platform: str | None = None) -> str:
+    plat = platform or sys.platform
+    base = (
+        "Install Atlassian CLI: "
+        "https://developer.atlassian.com/cloud/acli/guides/install-acli/"
+    )
+    if plat == "win32":
+        return (
+            base
+            + "\n  Put acli.exe on your user PATH, then open a new terminal. "
+            "Jira login uses an API token from "
+            "https://id.atlassian.com/manage-profile/security/api-tokens"
+        )
+    if plat.startswith("linux"):
+        return (
+            base
+            + "\n  Unpack the binary into ~/.local/bin (or another directory on PATH). "
+            "Jira login: acli jira auth login --site YOUR.atlassian.net "
+            "--email YOU@example.com --token"
+        )
+    return (
+        base
+        + "\n  e.g. brew install acli  (or download from the install guide). "
+        "Jira login uses an API token from "
+        "https://id.atlassian.com/manage-profile/security/api-tokens"
+    )
+
+
 def check_gh() -> CheckResult:
     if not shutil.which("gh"):
         return CheckResult(
             name="gh",
             ok=False,
             detail="not found on PATH",
-            hint="Install GitHub CLI: https://cli.github.com/ — e.g. brew install gh",
+            hint=gh_install_hint(),
         )
     auth = _run(["gh", "auth", "status"])
     if auth.returncode != 0:
@@ -50,10 +92,7 @@ def check_acli() -> CheckResult:
             name="acli",
             ok=False,
             detail="not found on PATH",
-            hint=(
-                "Install Atlassian CLI: "
-                "https://developer.atlassian.com/cloud/acli/guides/install-acli/"
-            ),
+            hint=acli_install_hint(),
         )
     probe = _run(
         [

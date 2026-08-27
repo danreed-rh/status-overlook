@@ -155,3 +155,211 @@ def test_handler_serves_index(monkeypatch):
     assert h._status == 200
     body = h.wfile.getvalue().decode("utf-8")
     assert "Status Overlook" in body
+
+
+def test_ui_url_ipv4_and_ipv6():
+    import socket
+
+    from status_overlook.serve import OverlookHTTPServer, OverlookHTTPServerV6, _ui_url
+
+    assert _ui_url("127.0.0.1", 8765) == "http://127.0.0.1:8765/"
+    assert _ui_url("localhost", 8765) == "http://127.0.0.1:8765/"
+    assert _ui_url("::1", 8765) == "http://[::1]:8765/"
+    assert OverlookHTTPServerV6.address_family == socket.AF_INET6
+    assert OverlookHTTPServer.address_family == socket.AF_INET
+
+
+def test_web_assets_cross_platform():
+    css = (_WEB_DIR / "style.css").read_text(encoding="utf-8")
+    html = (_WEB_DIR / "index.html").read_text(encoding="utf-8")
+    js = (_WEB_DIR / "app.js").read_text(encoding="utf-8")
+    assert "prefers-color-scheme: light" in css
+    assert "color-mix" in css
+    assert "forced-colors" in css
+    assert "Highlight" in css
+    assert 'name="color-scheme"' in html
+    assert 'id="uiOrigin"' in html
+    assert ":8765" not in html
+    assert 'aria-live="polite"' in html
+    assert "force: Boolean(force)" in js
+    assert "startRun(false)" in js
+    assert "startRun(true)" in js
+    assert "async function startRun(force = false)" in js
+    assert 'skipped === "working_hours"' in js
+    assert "res.status === 202" in js
+
+
+def test_api_run_skips_off_hours(monkeypatch):
+    from io import BytesIO
+
+    from status_overlook.config import AppConfig, WorkingHoursConfig
+
+    class FakeServer:
+        pass
+
+    class Handler(OverlookHandler):
+        def __init__(self):
+            self.requestline = "POST /api/run HTTP/1.1"
+            self.command = "POST"
+            self.path = "/api/run"
+            self.headers = {"Content-Length": "2"}
+            self.wfile = BytesIO()
+            self.rfile = BytesIO(b"{}")
+            self.request_version = "HTTP/1.1"
+            self.client_address = ("127.0.0.1", 12345)
+            self.server = FakeServer()
+            self._headers_buffer = []
+            self._status = None
+
+        def send_response(self, code, message=None):
+            self._status = code
+
+        def send_header(self, k, v):
+            self._headers_buffer.append((k, v))
+
+        def end_headers(self):
+            pass
+
+        def address_string(self):
+            return "127.0.0.1"
+
+    monkeypatch.setattr(
+        "status_overlook.serve.load_config",
+        lambda: (AppConfig(working_hours=WorkingHoursConfig(enabled=True)), None),
+    )
+    monkeypatch.setattr(
+        "status_overlook.serve.should_skip_working_hours",
+        lambda _wh, force=False: not force,
+    )
+
+    h = Handler()
+    h.do_POST()
+    assert h._status == 200
+    import json
+
+    payload = json.loads(h.wfile.getvalue().decode("utf-8"))
+    assert payload["skipped"] == "working_hours"
+    assert payload["started"] is False
+    from status_overlook.serve import _run_state
+
+    assert _run_state["skipped_working_hours"] is True
+
+
+def test_api_run_force_starts_thread(monkeypatch):
+    from io import BytesIO
+
+    from status_overlook.config import AppConfig, WorkingHoursConfig
+
+    class FakeLock:
+        def acquire(self, blocking=False):
+            return True
+
+        def release(self):
+            pass
+
+    started: list[dict] = []
+
+    class FakeThread:
+        def __init__(self, target=None, kwargs=None, daemon=None):
+            self.kwargs = kwargs or {}
+
+        def start(self):
+            started.append(self.kwargs)
+
+    class FakeServer:
+        pass
+
+    class Handler(OverlookHandler):
+        def __init__(self):
+            self.requestline = "POST /api/run HTTP/1.1"
+            self.command = "POST"
+            self.path = "/api/run"
+            self.headers = {"Content-Length": "16"}
+            self.wfile = BytesIO()
+            self.rfile = BytesIO(b'{"force": true}')
+            self.request_version = "HTTP/1.1"
+            self.client_address = ("127.0.0.1", 12345)
+            self.server = FakeServer()
+            self._headers_buffer = []
+            self._status = None
+
+        def send_response(self, code, message=None):
+            self._status = code
+
+        def send_header(self, k, v):
+            self._headers_buffer.append((k, v))
+
+        def end_headers(self):
+            pass
+
+        def address_string(self):
+            return "127.0.0.1"
+
+    monkeypatch.setattr(
+        "status_overlook.serve.load_config",
+        lambda: (AppConfig(working_hours=WorkingHoursConfig(enabled=True)), None),
+    )
+    monkeypatch.setattr(
+        "status_overlook.serve.should_skip_working_hours",
+        lambda _wh, force=False: not force,
+    )
+    monkeypatch.setattr("status_overlook.serve._run_lock", FakeLock())
+    monkeypatch.setattr("status_overlook.serve.threading.Thread", FakeThread)
+
+    h = Handler()
+    h.do_POST()
+    assert h._status == 202
+    assert started and started[0].get("force") is True
+
+
+def test_api_run_string_force_does_not_bypass_hours(monkeypatch):
+    from io import BytesIO
+    import json
+
+    from status_overlook.config import AppConfig, WorkingHoursConfig
+
+    class FakeServer:
+        pass
+
+    raw = b'{"force": "false"}'
+
+    class Handler(OverlookHandler):
+        def __init__(self):
+            self.requestline = "POST /api/run HTTP/1.1"
+            self.command = "POST"
+            self.path = "/api/run"
+            self.headers = {"Content-Length": str(len(raw))}
+            self.wfile = BytesIO()
+            self.rfile = BytesIO(raw)
+            self.request_version = "HTTP/1.1"
+            self.client_address = ("127.0.0.1", 12345)
+            self.server = FakeServer()
+            self._headers_buffer = []
+            self._status = None
+
+        def send_response(self, code, message=None):
+            self._status = code
+
+        def send_header(self, k, v):
+            self._headers_buffer.append((k, v))
+
+        def end_headers(self):
+            pass
+
+        def address_string(self):
+            return "127.0.0.1"
+
+    monkeypatch.setattr(
+        "status_overlook.serve.load_config",
+        lambda: (AppConfig(working_hours=WorkingHoursConfig(enabled=True)), None),
+    )
+    monkeypatch.setattr(
+        "status_overlook.serve.should_skip_working_hours",
+        lambda _wh, force=False: not force,
+    )
+
+    h = Handler()
+    h.do_POST()
+    assert h._status == 200
+    payload = json.loads(h.wfile.getvalue().decode("utf-8"))
+    assert payload["skipped"] == "working_hours"

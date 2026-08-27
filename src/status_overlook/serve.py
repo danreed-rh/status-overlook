@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import socket
 import sys
 import threading
 import time
@@ -18,9 +19,12 @@ from status_overlook.config import load_config
 from status_overlook.digest import _iso_now, build_ui_digest, mark_read, write_digests
 from status_overlook.run import run_pipeline
 from status_overlook.store import load_store, save_store
-from status_overlook.working_hours import is_within_working_hours
+from status_overlook.working_hours import is_within_working_hours, should_skip_working_hours
 
 _WEB_DIR = Path(__file__).resolve().parent / "web"
+
+# Set by run_serve; Refresh/auto-run honor --ignore-working-hours.
+_ignore_working_hours = False
 
 _run_lock = threading.Lock()
 _run_state: dict[str, Any] = {
@@ -32,6 +36,7 @@ _run_state: dict[str, Any] = {
     "started_at": None,
     "phase": None,
     "log_tail": "",
+    "skipped_working_hours": False,
 }
 
 
@@ -44,6 +49,7 @@ def _run_pipeline_bg(
     skip_github: bool = False,
     skip_jira: bool = False,
     skip_reconcile: bool = False,
+    force: bool = False,
 ) -> None:
     """Caller must hold _run_lock and set running=True before start."""
     import contextlib
@@ -57,6 +63,7 @@ def _run_pipeline_bg(
                 skip_github=skip_github,
                 skip_jira=skip_jira,
                 skip_reconcile=skip_reconcile,
+                force=force,
             )
         text = buf.getvalue()
         _set_run_state(
@@ -152,15 +159,38 @@ class OverlookHandler(BaseHTTPRequestHandler):
 
         if path == "/api/run":
             body = self._read_json()
+            force = body.get("force") is True or _ignore_working_hours
             if not _run_lock.acquire(blocking=False):
                 self._send_json(
                     409,
                     {"ok": False, "error": "run already in progress", **dict(_run_state)},
                 )
                 return
+            cfg, _ = load_config()
+            if should_skip_working_hours(cfg.working_hours, force=force):
+                _set_run_state(
+                    running=False,
+                    skipped_working_hours=True,
+                    last_ok=True,
+                    last_code=0,
+                    last_error=None,
+                    phase="skipped",
+                    log_tail="Outside working hours — skipped.",
+                )
+                _run_lock.release()
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "started": False,
+                        "skipped": "working_hours",
+                    },
+                )
+                return
             _set_run_state(
                 running=True,
                 last_error=None,
+                skipped_working_hours=False,
                 started_at=_iso_now(),
                 phase="starting",
                 log_tail="",
@@ -171,10 +201,23 @@ class OverlookHandler(BaseHTTPRequestHandler):
                     "skip_github": bool(body.get("skip_github")),
                     "skip_jira": bool(body.get("skip_jira")),
                     "skip_reconcile": bool(body.get("skip_reconcile")),
+                    "force": force,
                 },
                 daemon=True,
             )
-            thread.start()
+            try:
+                thread.start()
+            except Exception as exc:  # noqa: BLE001 — surface to UI
+                _run_lock.release()
+                _set_run_state(
+                    running=False,
+                    last_ok=False,
+                    last_error=str(exc),
+                    started_at=None,
+                    phase="failed",
+                )
+                self._send_json(500, {"ok": False, "error": str(exc)})
+                return
             self._send_json(202, {"ok": True, "started": True})
             return
 
@@ -216,6 +259,28 @@ class OverlookHandler(BaseHTTPRequestHandler):
         self._send(200, data, ctype or "application/octet-stream")
 
 
+def _ui_url(host: str, port: int) -> str:
+    if host == "localhost":
+        host = "127.0.0.1"
+    if ":" in host and not host.startswith("["):
+        return f"http://[{host}]:{port}/"
+    return f"http://{host}:{port}/"
+
+
+class OverlookHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+class OverlookHTTPServerV6(OverlookHTTPServer):
+    address_family = socket.AF_INET6
+
+
+def _make_httpd(host: str, port: int) -> OverlookHTTPServer:
+    cls = OverlookHTTPServerV6 if host == "::1" else OverlookHTTPServer
+    return cls((host, port), OverlookHandler)
+
+
 def run_serve(
     *,
     host: str = "127.0.0.1",
@@ -224,6 +289,8 @@ def run_serve(
     ignore_working_hours: bool = False,
 ) -> int:
     """Start localhost UI. Blocks until Ctrl-C."""
+    global _ignore_working_hours
+
     if host not in {"127.0.0.1", "localhost", "::1"}:
         print(f"Refusing non-localhost bind: {host!r} (personal UI only)")
         return 1
@@ -232,6 +299,7 @@ def run_serve(
         return 1
 
     cfg, _ = load_config()
+    _ignore_working_hours = ignore_working_hours
     if not ignore_working_hours and cfg.working_hours.enabled:
         if not is_within_working_hours(cfg.working_hours):
             print(
@@ -240,9 +308,20 @@ def run_serve(
             )
             return 0
 
-    httpd = ThreadingHTTPServer((host, port), OverlookHandler)
-    url = f"http://{host}:{port}/"
+    bind_host = "127.0.0.1" if host == "localhost" else host
+
+    try:
+        httpd = _make_httpd(bind_host, port)
+    except OSError as exc:
+        print(f"Could not bind {bind_host}:{port} — {exc}")
+        print("Is another serve already running? Try a different --port.")
+        return 1
+
+    url = _ui_url(bind_host, port)
     print(f"Status Overlook UI → {url}")
+    print("If the browser does not open, paste that URL into Chrome, Firefox, Edge, or Safari.")
+    if bind_host == "127.0.0.1":
+        print("On Windows, prefer 127.0.0.1 over localhost (IPv6 localhost can miss this server).")
     print("Agent digests unchanged on disk (status-overlook paths). Ctrl-C to stop.")
 
     if not ignore_working_hours and cfg.working_hours.enabled:
@@ -258,7 +337,13 @@ def run_serve(
         threading.Thread(target=_watch_working_hours, daemon=True).start()
 
     if open_browser:
-        webbrowser.open(url)
+        try:
+            opened = webbrowser.open(url)
+        except Exception as exc:  # noqa: BLE001 — never crash serve for a browser
+            print(f"Could not open a browser: {exc}")
+        else:
+            if not opened:
+                print("Could not open a browser automatically — open the URL above.")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

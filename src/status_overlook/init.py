@@ -71,6 +71,57 @@ def probe_jira_account_id() -> str:
     return str(assignee.get("accountId") or "")
 
 
+def next_steps_lines() -> list[str]:
+    """First-run commands printed after a successful init."""
+    return [
+        "Next:",
+        "  1. status-overlook run --force",
+        "  2. status-overlook show",
+        "  3. status-overlook serve --open",
+        "  (--force fills the store even outside quiet hours. "
+        "Off-hours UI: serve --ignore-working-hours.)",
+    ]
+
+
+def _choose_working_hours(
+    *,
+    path_exists: bool,
+    existing: AppConfig,
+    non_interactive: bool,
+) -> WorkingHoursConfig:
+    has_block = existing.raw.get("working_hours") is not None
+    if path_exists and has_block:
+        return existing.working_hours
+
+    if path_exists and not has_block:
+        # Preserve pre-quiet-hours configs unless the user opts in.
+        if non_interactive:
+            return WorkingHoursConfig.disabled()
+        print("")
+        print("This config has no working_hours block (sync currently runs at any time).")
+        if _prompt_yes("Enable weekday quiet hours (Mon–Fri 08:00–18:00 local)?", default=False):
+            return WorkingHoursConfig()
+        return WorkingHoursConfig.disabled()
+
+    # New config file
+    if non_interactive:
+        print(
+            "Note: weekday quiet hours enabled (Mon–Fri 08:00–18:00 local). "
+            "Edit working_hours in config.yaml, or use run --force / "
+            "serve --ignore-working-hours."
+        )
+        return WorkingHoursConfig()
+
+    print("")
+    print(
+        "Quiet hours skip gh/acli outside Mon–Fri 08:00–18:00 local "
+        "(serve will not start off-hours unless you pass --ignore-working-hours)."
+    )
+    if _prompt_yes("Enable weekday quiet hours?", default=True):
+        return WorkingHoursConfig()
+    return WorkingHoursConfig.disabled()
+
+
 def _guess_jira_site_from_acli() -> str:
     """Parse site from acli auth status text if present."""
     proc = subprocess.run(
@@ -113,18 +164,27 @@ def run_init(*, non_interactive: bool = False, force: bool = False) -> int:
     else:
         print("")
         login = _prompt("GitHub login", login)
-        site = _prompt("Jira site (host only)", guessed_site)
-        account_id = _prompt("Jira accountId (leave blank to keep probed)", account_id)
-        print("Optional custom fields (blank to skip):")
+        site = _prompt("Jira site (host only, e.g. yourorg.atlassian.net)", guessed_site)
+        print(
+            "Jira accountId is Atlassian's user id (not your email). "
+            "Leave blank to keep the probed value."
+        )
+        account_id = _prompt("Jira accountId", account_id)
+        print(
+            "Optional custom fields (blank to skip). In Jira these look like "
+            "customfield_NNNNN (field admin page or the field URL)."
+        )
         qa = _prompt("QA contact field (customfield_NNNNN)", existing.jira_qa_contact_field)
         pr = _prompt("PR link field (customfield_NNNNN)", existing.jira_pr_link_field)
 
     if qa and qa_field_to_jql(qa) is None:
         print(f"Warning: QA field {qa!r} is not customfield_<digits>; discovery will skip it.")
 
-    wh = existing.working_hours
-    if not path.is_file() or existing.raw.get("working_hours") is None:
-        wh = WorkingHoursConfig()
+    wh = _choose_working_hours(
+        path_exists=path.is_file(),
+        existing=existing,
+        non_interactive=non_interactive,
+    )
 
     cfg = AppConfig(
         github_login=login,
@@ -141,6 +201,7 @@ def run_init(*, non_interactive: bool = False, force: bool = False) -> int:
         status_done=existing.status_done,
         pins_jira=existing.pins_jira,
         pins_github=existing.pins_github,
+        pins_github_issues=existing.pins_github_issues,
         done_retention_days=existing.done_retention_days,
         search_limit=existing.search_limit,
         working_hours=wh,
@@ -156,5 +217,5 @@ def run_init(*, non_interactive: bool = False, force: bool = False) -> int:
             "Note: Jira accountId empty — QA matching may be incomplete until "
             "you have an assigned issue or set jira.account_id manually."
         )
-    print("Next: status-overlook run")
+    print("\n".join(next_steps_lines()))
     return 0

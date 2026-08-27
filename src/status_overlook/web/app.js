@@ -281,7 +281,7 @@
     await tick();
   }
 
-  async function startRun() {
+  async function startRun(force = false) {
     btnRun.disabled = true;
     runStatus.hidden = false;
     runStatus.textContent = "Starting refresh…";
@@ -289,20 +289,29 @@
       const res = await fetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: "{}",
+        body: JSON.stringify({ force: Boolean(force) }),
       });
-      if (res.status === 409) {
+      if (res.status === 409 || res.status === 202) {
         await waitForRun();
         return;
       }
-      if (!res.ok) {
-        runStatus.textContent = "Could not start refresh (" + res.status + ")";
-        btnRun.disabled = false;
-        return;
+      if (res.status === 200) {
+        const data = await res.json().catch(() => ({}));
+        if (data.skipped === "working_hours") {
+          runStatus.hidden = false;
+          runStatus.textContent =
+            "Skipped — outside working hours. Click Refresh now to sync anyway.";
+          btnRun.disabled = false;
+          if (force) btnRun.focus();
+          return;
+        }
       }
-      await waitForRun();
+      runStatus.textContent = "Could not start refresh (" + res.status + ")";
+      btnRun.disabled = false;
+      if (force) btnRun.focus();
     } catch (e) {
       stopWait("Could not start refresh: " + e);
+      if (force) btnRun.focus();
     }
   }
 
@@ -331,7 +340,7 @@
     const sec = Number($("interval").value || 0);
     if (sec > 0) {
       autoTimer = setInterval(() => {
-        if (!btnRun.disabled) startRun();
+        if (!btnRun.disabled) startRun(false);
       }, sec * 1000);
     }
   }
@@ -345,10 +354,14 @@
   CONTROL_IDS.forEach((id) => {
     $(id).addEventListener("change", onControlsChange);
   });
-  btnRun.addEventListener("click", () => startRun());
+  btnRun.addEventListener("click", () => startRun(true));
   btnMark.addEventListener("click", () => markRead());
 
   restorePrefs();
+  const originEl = $("uiOrigin");
+  if (originEl) {
+    originEl.textContent = window.location.origin + "/";
+  }
   loadDigest().catch((e) => {
     meta.textContent = String(e);
   });

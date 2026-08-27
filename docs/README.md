@@ -5,7 +5,8 @@
 | [AGENT_CONTEXT.md](AGENT_CONTEXT.md) | Cursor agents — architecture, phases, decisions, pitfalls, handoff |
 | [../.cursor/rules/agent-context.mdc](../.cursor/rules/agent-context.mdc) | Always-on Cursor rule (condensed from AGENT_CONTEXT) |
 | [../.cursor/skills/status-overlook-dev/SKILL.md](../.cursor/skills/status-overlook-dev/SKILL.md) | Implementation skill for this repo |
-| [CONFIG.md](CONFIG.md) | Users — paths, blocked detection, Review+PR, grouping |
+| [CONFIG.md](CONFIG.md) | Users — paths, blocked detection, Review+PR, grouping, UI |
+| [SMOKE.md](SMOKE.md) | Second-machine Linux/Windows smoke (Gate 5) |
 | [DECISIONS.md](DECISIONS.md) | Contributors — classification decision log (not ship narrative) |
 | [SUCCESS.md](SUCCESS.md) | Contributors — phase checklists |
 

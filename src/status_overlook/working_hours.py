@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, time
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from status_overlook.config import WorkingHoursConfig
 
@@ -58,23 +58,42 @@ def is_within_working_hours(
     *,
     now: datetime | None = None,
 ) -> bool:
-    """Return True when runs/serve are allowed (disabled config always True)."""
+    """Return True when runs/serve are allowed (disabled config always True).
+
+    Invalid timezone, clock, or empty weekday list fail *open* (treat as within
+    hours) so a bad config cannot lock out `run` / `serve`.
+    """
     if not wh.enabled:
         return True
 
-    tz = _resolve_tz(wh.timezone)
-    if now is None:
-        now = datetime.now(tz)
-    elif now.tzinfo is None:
-        now = now.replace(tzinfo=tz)
-    else:
-        now = now.astimezone(tz)
+    try:
+        tz = _resolve_tz(wh.timezone)
+        start = _parse_clock(wh.start)
+        end = _parse_clock(wh.end)
+        allowed_days = _weekday_set(wh.days)
+        if not allowed_days:
+            return True
 
-    allowed_days = _weekday_set(wh.days)
-    if now.weekday() not in allowed_days:
+        if now is None:
+            now = datetime.now(tz)
+        elif now.tzinfo is None:
+            now = now.replace(tzinfo=tz)
+        else:
+            now = now.astimezone(tz)
+
+        if now.weekday() not in allowed_days:
+            return False
+        return start <= now.time() < end
+    except (ValueError, TypeError, OSError, KeyError, ZoneInfoNotFoundError):
+        return True
+
+
+def should_skip_working_hours(
+    wh: WorkingHoursConfig,
+    *,
+    force: bool = False,
+) -> bool:
+    """True when a run should no-op because of quiet hours."""
+    if force or not wh.enabled:
         return False
-
-    start = _parse_clock(wh.start)
-    end = _parse_clock(wh.end)
-    current = now.time()
-    return start <= current < end
+    return not is_within_working_hours(wh)

@@ -30,22 +30,52 @@ Uses the `gh` and `acli` CLIs (prompts to install or log in when needed). Writes
 
 ## Install
 
-Requires Python 3.10+, plus [`gh`](https://cli.github.com/) and [`acli`](https://developer.atlassian.com/cloud/acli/) on your `PATH`.
+Requires **Python 3.10+**, plus [`gh`](https://cli.github.com/) and [`acli`](https://developer.atlassian.com/cloud/acli/) on your `PATH`.
 
-### pipx (recommended)
+### 1. GitHub CLI (`gh`)
+
+| OS | Typical install |
+|----|-----------------|
+| macOS | `brew install gh` |
+| Debian / Ubuntu | `sudo apt install gh` (or the [GitHub apt repo](https://github.com/cli/cli/blob/trunk/docs/install_linux.md)) |
+| Fedora / RHEL | `sudo dnf install gh` |
+| Windows | `winget install GitHub.cli` |
+
+Then: `gh auth login`.
+
+### 2. Atlassian CLI (`acli`)
+
+Install from the [acli install guide](https://developer.atlassian.com/cloud/acli/guides/install-acli/). Put the binary on `PATH` (`~/.local/bin` on Linux; user PATH on Windows). Create a Jira API token at [id.atlassian.com](https://id.atlassian.com/manage-profile/security/api-tokens), then:
+
+```bash
+acli jira auth login --site YOUR.atlassian.net --email YOU@example.com --token
+```
+
+### 3. Status Overlook
+
+**pipx (recommended)**
 
 ```bash
 pipx install git+https://github.com/danreed-rh/status-overlook.git
 status-overlook --version
 ```
 
-### uv
+Windows PowerShell if `pipx` is missing:
+
+```powershell
+py -3 -m pip install --user pipx
+py -3 -m pipx ensurepath
+# Reopen the terminal, then:
+pipx install git+https://github.com/danreed-rh/status-overlook.git
+```
+
+**uv**
 
 ```bash
 uv tool install git+https://github.com/danreed-rh/status-overlook.git
 ```
 
-### Dev checkout
+**Dev checkout**
 
 ```bash
 git clone https://github.com/danreed-rh/status-overlook.git
@@ -56,18 +86,24 @@ pip install -e ".[dev]"
 status-overlook --version
 ```
 
-Upgrade later: `pipx upgrade status-overlook` or `uv tool upgrade status-overlook` (or reinstall from git).
+Upgrade later: `pipx upgrade status-overlook` or `uv tool upgrade status-overlook` (or reinstall from git). There is no PyPI package yet.
 
 ## Quick start
 
 ```bash
 status-overlook init          # probe gh/acli, write config.yaml
 status-overlook doctor
-status-overlook run
+status-overlook run --force   # first sync (works outside quiet hours)
 status-overlook show
 status-overlook mark-read
-status-overlook serve --open   # optional local UI
+status-overlook serve --open   # optional local UI (Chrome/Firefox/Edge/Safari)
 ```
+
+`init` asks whether to enable weekday quiet hours (Mon–Fri 08:00–18:00 local). New non-interactive configs enable them. Off-hours, `run` no-ops unless `--force`, and `serve` needs `--ignore-working-hours`.
+
+`show` uses color in a real terminal. Set `NO_COLOR=1` to disable. Prefer Windows Terminal over classic `cmd.exe`.
+
+Open the UI at **`http://127.0.0.1:8765/`**. On Windows, `http://localhost:8765/` can hit IPv6 (`::1`) and miss a server bound to IPv4.
 
 ### Optional scheduler
 
@@ -78,6 +114,10 @@ status-overlook uninstall --dry-run
 status-overlook uninstall             # scheduler + app data dirs
 ```
 
+- **Linux:** `systemd --user` timers run while you are logged in. To keep syncing after logout: `loginctl enable-linger "$USER"`. Distros without systemd (some WSL, Alpine) can still use `run` / `serve`; skip the scheduler.
+- **Windows:** the task uses InteractiveToken (runs while you are logged in). If it fails to start, set Command to the full path from `where status-overlook`.
+- **macOS:** LaunchAgent (runs in your GUI session).
+
 Uninstall does **not** remove the pipx/uv binary — use `pipx uninstall status-overlook` or `uv tool uninstall status-overlook`.
 
 ## CLI
@@ -87,13 +127,13 @@ status-overlook init [--force] [--non-interactive]
 status-overlook doctor [--skip-github] [--skip-jira]
 status-overlook paths
 status-overlook reconcile [--skip-github] [--skip-jira] [--dry-run]
-status-overlook run [--skip-github] [--skip-jira] [--skip-reconcile]
+status-overlook run [--skip-github] [--skip-jira] [--skip-reconcile] [--force]
 status-overlook show [--store] [--since-read] [--section …] [--plain] [-v]
 status-overlook mark-read [--all] [ids…]
 status-overlook install-scheduler [--every 15m]
 status-overlook uninstall-scheduler [--dry-run]
 status-overlook uninstall [--dry-run] [-y]
-status-overlook serve [--host 127.0.0.1] [--port 8765] [--open]
+status-overlook serve [--host 127.0.0.1] [--port 8765] [--open] [--ignore-working-hours]
 ```
 
 ### Local UI vs CLI vs scheduler
@@ -101,7 +141,7 @@ status-overlook serve [--host 127.0.0.1] [--port 8765] [--open]
 | Tool | Use when |
 |------|----------|
 | `show` / digest files | Terminal or **agents** (always prefer files for agents) |
-| `serve` | Browser: Actionable / All active / Everything, source filters; auto-refresh reloads the list after each run |
+| `serve` | Browser at `http://127.0.0.1:8765/` (same store as CLI). Needs a current Chrome, Firefox, Edge, or Safari. Follows the OS light/dark preference. |
 | `install-scheduler` | Background refresh without keeping the UI open |
 
 ## Where files live

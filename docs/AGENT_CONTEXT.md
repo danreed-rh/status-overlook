@@ -160,13 +160,13 @@ Original phased plan lived in `my-cursor-claw` at `.cursor/plans/work_sync_phase
 /Users/dareed/Dev/status-overlook/.venv/bin/status-overlook serve --open
 ```
 
-- URL: `http://127.0.0.1:8765/` (localhost only)  
+- **URL:** `http://127.0.0.1:8765/` (localhost only; `localhost` is rewritten to IPv4)  
 - Static files: `src/status_overlook/web/{index.html,style.css,app.js}`  
 - **Views:** Actionable, All active, **Everything** (active + done), Pending, Blocked, Recently done  
 - **Source filters:** both, github (PRs+Issues), github_pr, github_issue, jira  
-- **Auto-refresh:** runs full `run` pipeline; reloads list when finished (not when OS scheduler alone updates disk)  
+- **Auto-refresh:** runs full `run` pipeline; **skips** off-hours. Refresh now passes `force`. Reloads the list when a run finishes (not when OS scheduler alone updates disk)  
 - **Prefs:** view/source/interval persisted in URL query + `localStorage`  
-- **Dark theme:** Wong-style accents; pills use glyph + label (`! Actionable`, etc.) — color never sole cue  
+- **Theme:** follows `prefers-color-scheme` (light or dark). Cue pills; section headers name the bucket.  
 
 Restart `serve` after editing static assets (or hard-refresh browser).
 
@@ -193,7 +193,7 @@ pip install -e ".[dev]"
 | Digests | `~/Library/Caches/status-overlook/` |
 | Logs | `~/Library/Logs/status-overlook/` |
 
-**Tests:** 109 unit tests; focus on classification, reconcile, digest grouping, provider mocks, serve payload. No network in default pytest.
+**Tests:** unit tests; focus on classification, reconcile, digest grouping, provider mocks, serve payload. No network in default pytest.
 
 **Style:** stdlib-first; PyYAML for config only; `http.server` for UI (no Flask). Minimize scope; match existing patterns in neighboring modules.
 
@@ -258,8 +258,7 @@ Pick based on user ask; none are required for v0.2.0:
 - UI: poll digest file without full `run` when scheduler updates in background  
 - `ghd` provider (deferred Q6)  
 - Repo allowlists / org filters  
-- Second-machine Gate 5 smoke (skipped by owner)  
-- Light/dark toggle (explicitly out of scope for dark UI pass)  
+- Human Gate 5 smoke on a real Linux VM and Windows PC — [SMOKE.md](SMOKE.md)  
 
 ---
 
@@ -273,4 +272,4 @@ Pick based on user ask; none are required for v0.2.0:
 
 ---
 
-*Last updated: 2026-08-11 — reflects phases 0–6 complete, GitHub Issues, github_pr rename, dark UI, Everything view, PR thread classification fix.*
+*Last updated: 2026-08-27 — Linux/Windows onboarding, portable contrib templates, UI light/dark + off-hours Refresh now.*

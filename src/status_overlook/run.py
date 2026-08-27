@@ -7,7 +7,7 @@ from status_overlook.digest import write_digests
 from status_overlook.enrich import enrich_and_classify_store
 from status_overlook.reconcile import run_reconcile
 from status_overlook.store import load_store, save_store
-from status_overlook.working_hours import is_within_working_hours
+from status_overlook.working_hours import should_skip_working_hours
 
 
 def run_pipeline(
@@ -18,13 +18,12 @@ def run_pipeline(
     force: bool = False,
 ) -> int:
     cfg, _ = load_config()
-    if not force and cfg.working_hours.enabled:
-        if not is_within_working_hours(cfg.working_hours):
-            print(
-                "Outside working hours — skipping run "
-                "(use status-overlook run --force to override)."
-            )
-            return 0
+    if should_skip_working_hours(cfg.working_hours, force=force):
+        print(
+            "Outside working hours — skipping run "
+            "(use status-overlook run --force to override)."
+        )
+        return 0
 
     if not skip_reconcile:
         _, _, code = run_reconcile(skip_github=skip_github, skip_jira=skip_jira)

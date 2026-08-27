@@ -31,6 +31,7 @@ def test_save_load_config_roundtrip(tmp_path: Path, monkeypatch):
     assert loaded.jira_account_id == "abc-123"
     assert loaded.jira_qa_contact_field == "customfield_10470"
     assert "In Progress" in loaded.status_active
+    assert loaded.pins_github_issues == ()
 
 
 def stat_mode(path: Path) -> int:

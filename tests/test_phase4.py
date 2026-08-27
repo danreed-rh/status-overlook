@@ -1,3 +1,7 @@
+import re
+import sys
+from pathlib import Path
+
 from status_overlook.doctor import CheckResult, doctor_ok
 from status_overlook.scheduler import (
     parse_every,
@@ -21,13 +25,20 @@ def test_render_plist_contains_label_and_interval():
     assert "<integer>900</integer>" in xml
     assert "/usr/bin/status-overlook" in xml
     assert "StartInterval" in xml
-    assert "/opt/homebrew/bin" in xml
+
+    path_m = re.search(r"<key>PATH</key>\s*<string>([^<]+)</string>", xml)
+    assert path_m, xml
+    path_val = path_m.group(1)
+    assert str(Path.home() / ".local" / "bin") in path_val
+    if sys.platform == "darwin":
+        assert "/opt/homebrew/bin" in path_val
 
 
 def test_render_systemd_units():
     service = render_systemd_service(program=["/usr/bin/status-overlook", "run"])
     assert "ExecStart=/usr/bin/status-overlook run" in service
     assert "Type=oneshot" in service
+    assert 'Environment="PATH=' in service
     timer = render_systemd_timer(every_seconds=900)
     assert "OnUnitActiveSec=15min" in timer
     assert "status-overlook.sync.service" in timer
@@ -40,6 +51,8 @@ def test_render_windows_task_xml():
         every_seconds=900, program=[r"C:\Tools\status-overlook.exe", "run"]
     )
     assert "PT15M" in xml
+    assert "P365D" in xml
+    assert "cmd.exe" in xml
     assert r"C:\Tools\status-overlook.exe" in xml
     assert "run" in xml
 

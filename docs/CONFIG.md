@@ -40,26 +40,30 @@ User-domain only — no `/Library` system agents in v1.
 
 `status-overlook install-scheduler --every 15m` installs a **user** job that runs `status-overlook run`:
 
-- macOS — LaunchAgent
-- Linux — systemd user timer
-- Windows — Task Scheduler
+- macOS — LaunchAgent (your GUI session)
+- Linux — systemd user timer. Timers run **while you are logged in**. To keep them after logout or at boot without a session: `loginctl enable-linger "$USER"`. No systemd (some WSL, Alpine) → use `run` / `serve` only.
+- Windows — Task Scheduler with `InteractiveToken` (runs **while you are logged in**). If the task cannot find the binary, set Command to the full path from `where status-overlook`.
 
-Example unit/plist/XML templates also live under [`contrib/`](../contrib/). Off-hours behavior (below) applies to scheduler-triggered `run` as well as UI auto-refresh.
+Example unit/plist/XML templates also live under [`contrib/`](../contrib/) (placeholders only — prefer the CLI). Off-hours behavior (below) applies to scheduler-triggered `run` as well as UI auto-refresh.
+
+Second-machine checklist: [`SMOKE.md`](SMOKE.md).
 
 ## Working hours (quiet mode)
 
 Optional `working_hours` in `config.yaml` limits when `status-overlook run` calls `gh` / `acli`, and when `serve` stays up.
 
-**Defaults** (when the block is present or written by `init`):
+**Defaults** (when the block is present or written by `init` for a **new** config):
 
 | Field | Default |
 |-------|---------|
-| `enabled` | `true` |
+| `enabled` | `true` (init asks in interactive mode; non-interactive new configs enable it) |
 | `days` | Monday–Friday |
 | `start` / `end` | `08:00` / `18:00` (end exclusive — 18:00 is off-hours) |
-| `timezone` | System local (optional IANA override, e.g. `America/New_York`) |
+| `timezone` | System local (optional **IANA** name, e.g. `America/New_York` — not Windows `Eastern Standard Time`) |
 
-**Existing installs** without a `working_hours` key are unchanged (feature disabled).
+**Existing installs** without a `working_hours` key stay disabled. Re-running `init --force` on those configs does **not** turn quiet hours on unless you opt in (interactive) — non-interactive overwrite keeps them off.
+
+Invalid timezone or clock values fail **open** (`run` / `serve` still work) so a typo cannot lock you out.
 
 ```yaml
 working_hours:
@@ -134,13 +138,19 @@ Recently done is not grouped. JSON digest keeps all items and adds `group_primar
 
 ## Local UI (`serve`)
 
-`status-overlook serve [--port 8765] [--open]` starts a **localhost-only** page:
+`status-overlook serve [--port 8765] [--open]` starts a **localhost-only** page. Same store and digests as the CLI. Works on macOS, Linux, and Windows: it is HTML/CSS/JS over `http.server`, not a native app.
 
+- **URL:** `http://127.0.0.1:8765/` — prefer this over `http://localhost:8765/` on Windows (IPv6 `localhost` can miss an IPv4 bind). `--host localhost` is rewritten to `127.0.0.1`.
+- **Browsers:** current Chrome, Firefox, Edge, or Safari. The page follows the OS light/dark setting (`prefers-color-scheme`). Internet Explorer is not supported.
+- **`--open`:** uses the OS default browser. If nothing opens (WSL without `wslview`, headless Linux), paste the printed URL.
 - Views: Actionable, All active, **Everything** (active + recently done), Pending, Blocked, Recently done
 - Source filter: Jira + GitHub / GitHub (PRs + Issues) / PRs / Issues / Jira
-- Refresh now + optional auto-refresh (1m / 5m / 15m): each tick runs the full `run` pipeline and **reloads the list** when that run finishes. OS scheduler updates digests on disk but does not refresh an open browser tab by itself.
+- **Refresh now** runs the full pipeline even outside working hours (`force`). Auto-refresh ticks **skip** off-hours and say so instead of pretending the store updated.
+- OS scheduler updates digests on disk but does not refresh an open tab by itself.
 - Mark all read
-- Dark UI with colorblind-safe status accents; status also shown as labeled pills (`! Actionable`, etc.)
+- Cue pills (next-step labels). Section headers name the bucket (Actionable / Pending / …).
+
+Restart `serve` after Python or static-file changes. If the port is in use, the CLI prints that and suggests `--port`.
 
 ### GitHub Issues
 

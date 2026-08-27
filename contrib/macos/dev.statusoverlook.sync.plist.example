@@ -6,7 +6,7 @@
   <string>dev.statusoverlook.sync</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/local/bin/status-overlook</string>
+    <string>/path/to/status-overlook</string>
     <string>run</string>
   </array>
   <key>StartInterval</key>
@@ -14,13 +14,13 @@
   <key>RunAtLoad</key>
   <true/>
   <key>StandardOutPath</key>
-  <string>/Users/dareed/Library/Logs/status-overlook/scheduler.stdout.log</string>
+  <string>/Users/YOU/Library/Logs/status-overlook/scheduler.stdout.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/dareed/Library/Logs/status-overlook/scheduler.stderr.log</string>
+  <string>/Users/YOU/Library/Logs/status-overlook/scheduler.stderr.log</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/Users/dareed/.local/bin:/usr/bin:/bin:/opt/homebrew/sbin:/System/Cryptexes/App/usr/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/usr/local/go/bin:/usr/local/munki:/Applications/Cursor.app/Contents/Resources/app/node_modules/@vscode/ripgrep/bin:/Users/dareed/.cargo/bin</string>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Users/YOU/.local/bin</string>
   </dict>
 </dict>
 </plist>

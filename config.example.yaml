@@ -1,5 +1,7 @@
 # Example config. Prefer: status-overlook init
-# macOS path: ~/Library/Application Support/status-overlook/config.yaml
+# macOS: ~/Library/Application Support/status-overlook/config.yaml
+# Linux: ~/.config/status-overlook/config.yaml
+# Windows: %LOCALAPPDATA%\status-overlook\config.yaml
 
 schema_version: 1
 

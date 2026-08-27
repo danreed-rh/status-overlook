@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark light" />
   <title>Status Overlook</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
@@ -51,11 +52,13 @@
       <button type="button" id="btnMark" class="secondary">Mark all read</button>
     </div>
   </header>
-  <p class="status-line" id="runStatus" hidden></p>
+  <p class="status-line" id="runStatus" hidden role="status" aria-live="polite"></p>
   <main id="main"></main>
   <footer>
     <p>
-      Local UI only · digests on disk for agents ·
+      Local UI only · open <code id="uiOrigin"></code>
+      (avoid <code>localhost</code> on Windows if the page is blank) ·
+      Chrome / Firefox / Edge / Safari ·
       <code>status-overlook show --plain</code>
     </p>
   </footer>
