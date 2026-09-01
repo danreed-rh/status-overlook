@@ -515,16 +515,76 @@ def enrich_github_issue(
     ), str(data.get("title") or item.summary), str(data.get("url") or item.url)
 
 
-def _jira_fields_list(cfg: AppConfig) -> str:
-    # Note: acli search rejects `issuelinks`; links are loaded via workitem view.
-    fields = ["key", "summary", "status", "assignee", "labels", "issuetype"]
+_ACLI_FIELD_NOT_ALLOWED_RE = re.compile(
+    r"field '([^']+)' is not allowed", re.IGNORECASE
+)
+
+
+def _jira_search_fields() -> str:
+    # acli search rejects `issuelinks` and `customfield_*`; those load via view.
+    return "key,summary,status,assignee,labels,issuetype,flagged"
+
+
+def _parse_acli_disallowed_field(err: str) -> str | None:
+    m = _ACLI_FIELD_NOT_ALLOWED_RE.search(err or "")
+    return m.group(1) if m else None
+
+
+def _acli_workitem_search(*, jql: str, fields: str, limit: int) -> list:
+    """Search with --fields; drop any field acli rejects and retry."""
+    remaining = [part.strip() for part in fields.split(",") if part.strip()]
+    last_err = "acli failed"
+    while remaining:
+        cmd = [
+            "acli",
+            "jira",
+            "workitem",
+            "search",
+            "--jql",
+            jql,
+            "--fields",
+            ",".join(remaining),
+            "--limit",
+            str(limit),
+            "--json",
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if proc.returncode == 0:
+            rows = json.loads(proc.stdout or "[]")
+            if not isinstance(rows, list):
+                raise RuntimeError(f"unexpected acli JSON: {type(rows)}")
+            return rows
+        last_err = (proc.stderr or proc.stdout or "acli failed").strip()
+        bad = _parse_acli_disallowed_field(last_err)
+        if not bad:
+            raise RuntimeError(last_err)
+        nxt = [f for f in remaining if f.casefold() != bad.casefold()]
+        if len(nxt) == len(remaining):
+            raise RuntimeError(last_err)
+        print(f"Warning: acli search rejected {bad!r}; retrying without it")
+        remaining = nxt
+    raise RuntimeError(last_err)
+
+
+def _jira_view_field_names(cfg: AppConfig) -> list[str]:
+    names = ["issuelinks"]
     if cfg.jira_qa_contact_field:
-        fields.append(cfg.jira_qa_contact_field)
+        names.append(cfg.jira_qa_contact_field)
     if cfg.jira_pr_link_field:
-        fields.append(cfg.jira_pr_link_field)
-    # Best-effort Flagged; ignore if acli rejects later
-    fields.append("flagged")
-    return ",".join(fields)
+        names.append(cfg.jira_pr_link_field)
+    return names
+
+
+def _qa_contact_is_user(value: object, account_id: str) -> bool:
+    if not account_id:
+        return False
+    if isinstance(value, dict):
+        qa_id = str(value.get("accountId") or "")
+        return bool(qa_id) and qa_id == account_id
+    if isinstance(value, list) and value and isinstance(value[0], dict):
+        qa_id = str(value[0].get("accountId") or "")
+        return bool(qa_id) and qa_id == account_id
+    return False
 
 
 def _status_is_terminal(status_obj: object, cfg: ClassifyConfig) -> bool:
@@ -694,8 +754,8 @@ def blocked_by_unresolved_from_fields(fields: dict, cfg: ClassifyConfig) -> bool
     return False
 
 
-def fetch_jira_issuelinks(key: str) -> list:
-    """Load issuelinks via acli view (search forbids the field)."""
+def fetch_jira_view_fields(key: str, fields: str) -> dict:
+    """Load fields via acli view (search forbids issuelinks and customfield_*)."""
     if not is_jira_key(key):
         raise ValueError(f"invalid jira key: {key}")
     cmd = [
@@ -705,18 +765,22 @@ def fetch_jira_issuelinks(key: str) -> list:
         "view",
         key,
         "--fields",
-        "issuelinks",
+        fields,
         "--json",
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
-        raise RuntimeError((proc.stderr or proc.stdout or "acli view issuelinks failed").strip())
+        raise RuntimeError((proc.stderr or proc.stdout or "acli view failed").strip())
     data = json.loads(proc.stdout or "{}")
     if not isinstance(data, dict):
-        return []
-    fields = data.get("fields") or {}
-    if not isinstance(fields, dict):
-        return []
+        return {}
+    parsed = data.get("fields") or {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def fetch_jira_issuelinks(key: str) -> list:
+    """Load issuelinks via acli view (search forbids the field)."""
+    fields = fetch_jira_view_fields(key, "issuelinks")
     links = fields.get("issuelinks") or fields.get("issueLinks") or []
     return links if isinstance(links, list) else []
 
@@ -736,33 +800,12 @@ def enrich_jira_issues(
         return {}
     # Batch in chunks of 40
     out: dict[str, tuple[JiraIssueSnapshot, str, str]] = {}
-    fields = _jira_fields_list(cfg)
+    fields = _jira_search_fields()
     classify_cfg = cfg.classify_config()
     for i in range(0, len(valid_keys), 40):
         chunk = valid_keys[i : i + 40]
         jql = "key in (" + ", ".join(chunk) + ")"
-        cmd = [
-            "acli",
-            "jira",
-            "workitem",
-            "search",
-            "--jql",
-            jql,
-            "--fields",
-            fields,
-            "--limit",
-            str(len(chunk)),
-            "--json",
-        ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if proc.returncode != 0 and "flagged" in (proc.stderr or "").lower():
-            # Retry without flagged field name
-            fields_alt = ",".join(f for f in fields.split(",") if f.casefold() != "flagged")
-            cmd[cmd.index("--fields") + 1] = fields_alt
-            proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if proc.returncode != 0:
-            raise RuntimeError((proc.stderr or proc.stdout or "acli failed").strip())
-        rows = json.loads(proc.stdout or "[]")
+        rows = _acli_workitem_search(jql=jql, fields=fields, limit=len(chunk))
         for row in rows:
             key = str(row.get("key") or "")
             if not is_jira_key(key):
@@ -776,18 +819,6 @@ def enrich_jira_issues(
             assignee_is_user = bool(
                 identity.jira_account_id and assignee_id == identity.jira_account_id
             )
-            qa_is_user = False
-            if cfg.jira_qa_contact_field and identity.jira_account_id:
-                qa = f.get(cfg.jira_qa_contact_field)
-                if isinstance(qa, dict):
-                    qa_id = str(qa.get("accountId") or "")
-                    qa_is_user = bool(qa_id) and qa_id == identity.jira_account_id
-                elif isinstance(qa, list) and qa and isinstance(qa[0], dict):
-                    qa_id = str(qa[0].get("accountId") or "")
-                    qa_is_user = bool(qa_id) and qa_id == identity.jira_account_id
-            pr_link = None
-            if cfg.jira_pr_link_field:
-                pr_link = _extract_pr_link(f.get(cfg.jira_pr_link_field))
             issue_type = ((f.get("issuetype") or {}).get("name") or "")
             site = cfg.jira_site.strip()
             if site:
@@ -798,24 +829,45 @@ def enrich_jira_issues(
                 key=key,
                 status=status,
                 assignee_is_user=assignee_is_user,
-                qa_contact_is_user=qa_is_user,
+                qa_contact_is_user=False,
                 flagged=_flagged_from_fields(f),
                 labels=labels,
-                pr_link=pr_link,
+                pr_link=None,
                 issue_type=issue_type,
             )
             out[key] = (snap, summary, url)
 
-    # Issuelinks: acli search rejects the field; one view per issue
+    # Issuelinks + QA/PR custom fields: acli search rejects those; one view per issue
+    view_fields = ",".join(_jira_view_field_names(cfg))
     for key, (snap, summary, url) in list(out.items()):
         try:
-            links = fetch_jira_issuelinks(key)
-            snap.blocked_by_unresolved = blocked_by_unresolved_from_fields(
-                {"issuelinks": links}, classify_cfg
-            )
+            vf = fetch_jira_view_fields(key, view_fields)
         except (RuntimeError, json.JSONDecodeError, ValueError) as exc:
-            print(f"Warning: issuelinks for {key}: {exc}")
-            snap.blocked_by_unresolved = False
+            print(f"Warning: view for {key}: {exc}")
+            vf = {}
+            try:
+                vf = fetch_jira_view_fields(key, "issuelinks")
+            except (RuntimeError, json.JSONDecodeError, ValueError) as exc2:
+                print(f"Warning: issuelinks for {key}: {exc2}")
+            for extra in _jira_view_field_names(cfg):
+                if extra == "issuelinks":
+                    continue
+                try:
+                    vf.update(fetch_jira_view_fields(key, extra))
+                except (RuntimeError, json.JSONDecodeError, ValueError) as exc3:
+                    print(f"Warning: field {extra} for {key}: {exc3}")
+        links = vf.get("issuelinks") or vf.get("issueLinks") or []
+        if not isinstance(links, list):
+            links = []
+        snap.blocked_by_unresolved = blocked_by_unresolved_from_fields(
+            {"issuelinks": links}, classify_cfg
+        )
+        if cfg.jira_qa_contact_field and identity.jira_account_id:
+            snap.qa_contact_is_user = _qa_contact_is_user(
+                vf.get(cfg.jira_qa_contact_field), identity.jira_account_id
+            )
+        if cfg.jira_pr_link_field:
+            snap.pr_link = _extract_pr_link(vf.get(cfg.jira_pr_link_field))
         out[key] = (snap, summary, url)
 
     # Review + Git PR field: probe whether linked PR is merged (gh)

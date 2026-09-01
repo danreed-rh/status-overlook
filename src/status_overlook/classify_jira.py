@@ -39,7 +39,7 @@ def classify_jira(
     - Blocked (status / label / Flagged / unresolved is-blocked-by) → blocked
     - Epic + assignee: pending until all children are done; then actionable
     - Testing + QA contact → actionable
-    - Testing + assignee only → untracked (not actionable, not pending)
+    - Testing + assignee only → pending (waiting on QA / testing)
     - Review + assignee + linked PR merged → actionable (move to Testing / resolve)
     - Review + assignee (otherwise) → pending
     - Active + assignee → actionable
@@ -107,11 +107,11 @@ def classify_jira(
                 reasons=tuple(reasons),
                 blocked=False,
             )
-        # Assignee-only in Testing: not actionable, not pending
+        # Assignee-only in Testing: waiting on QA, still on your list
         if issue.assignee_is_user:
             return ClassificationResult(
-                lifecycle=Lifecycle.UNTRACKED,
-                action=ActionState.IGNORE,
+                lifecycle=Lifecycle.ACTIVE,
+                action=ActionState.PENDING,
                 reasons=("jira_testing_assignee_only",),
                 blocked=False,
             )

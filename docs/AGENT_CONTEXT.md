@@ -97,7 +97,7 @@ Show/digest section order: **Actionable → Pending → Blocked → Recently don
 - **Blocked:** status `Blocked`, label `blocked`, Flagged, or unresolved *is blocked by* link (`acli view` for issuelinks — search rejects that field).
 - **Review + assignee:** pending; **Review + merged PR** (`pr_link_field`) → actionable (`jira_review_pr_merged`).
 - **Epic:** pending until all children terminal; `[Epic]` tag; sort to bottom of active sections.
-- **Testing + QA contact:** actionable; Testing + assignee only → ignore.
+- **Testing + QA contact:** actionable; Testing + assignee only → pending (cue **Testing**).
 
 ### GitHub PR (high level)
 
@@ -242,7 +242,9 @@ These were built or fixed in Cursor sessions; useful when debugging “why doesn
 | Symptom | Likely cause |
 |---------|----------------|
 | Issue not in digest | Not discovered (`assignee:@me` only); run `status-overlook run`; check `track_store.json` |
+| QA Testing ticket missing | `jira.qa_contact_field` empty in config; or enrich used search `--fields customfield_*` (acli rejects — load via `workitem view`) |
 | UI missing new view/section | Stale `serve` process — restart |
+| UI Refresh: `field 'customfield_*' is not allowed` | Serve process imported enrich before QA fields moved to `workitem view`; restart serve. `/api/run` reloads `enrich.py` so a later Refresh picks up the file without a full restart. |
 | Dropdown prefs reset on reload | Fixed: URL + localStorage in `app.js` |
 | `run` crashes on reconcile | Missing provider function or import error — run pytest |
 | Jira items marked done after `run --skip-jira` | Reconcile finishes items absent from candidate set — use full `run` to restore |

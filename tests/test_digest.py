@@ -246,7 +246,7 @@ def test_digest_excludes_ignore_from_recently_done():
                 key="IGN-1",
                 lifecycle="done",
                 action="ignore",
-                summary="testing assignee only",
+                summary="not assignee",
                 remote_status="Testing",
             ),
             "jira:DONE-1": TrackedItem(

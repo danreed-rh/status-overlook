@@ -81,6 +81,8 @@ Style: stdlib-first; PyYAML for config only; `http.server` for UI. Minimize scop
 | Symptom | Likely cause |
 |---------|----------------|
 | Issue missing from digest | Not assignee-discovered; run full `run`; check `track_store.json` |
+| QA Testing ticket missing | Empty `jira.qa_contact_field`; acli search rejects `customfield_*` — enrich uses `workitem view` |
 | UI missing view/section | Stale `serve` process — restart |
+| UI Refresh: field customfield_* not allowed | Serve loaded enrich before the view-based QA fetch; restart serve (Refresh now reloads enrich.py) |
 | Jira items done after `run --skip-jira` | Reconcile finishes absent candidates — use full `run` |
 | Grouped row wrong primary | Open PR wins tie-break in `build_work_groups` |

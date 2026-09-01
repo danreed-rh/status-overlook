@@ -1,10 +1,19 @@
 """Unit tests for GitHub PR state normalization (no network)."""
 
+import json
+
+from status_overlook.config import AppConfig
 from status_overlook.enrich import (
+    Identity,
+    _acli_workitem_search,
     _body_has_slash_lgtm,
+    _jira_search_fields,
+    _parse_acli_disallowed_field,
+    _qa_contact_is_user,
     _status_is_terminal,
     _user_gave_lgtm,
     blocked_by_unresolved_from_fields,
+    enrich_jira_issues,
     github_remote_status,
     normalize_github_pr_state,
     parse_github_pr_url,
@@ -296,3 +305,111 @@ def test_user_gave_lgtm_from_comment_or_label():
         actionable_labels=("lgtm",),
         label_insensitive=True,
     )
+
+
+def test_jira_search_fields_omit_custom_and_links():
+    fields = _jira_search_fields()
+    assert "customfield" not in fields
+    assert "issuelinks" not in fields
+    assert "status" in fields
+
+
+def test_qa_contact_is_user_dict_and_list():
+    aid = "acc-1"
+    assert _qa_contact_is_user({"accountId": "acc-1"}, aid)
+    assert not _qa_contact_is_user({"accountId": "other"}, aid)
+    assert _qa_contact_is_user([{"accountId": "acc-1"}], aid)
+    assert not _qa_contact_is_user(None, aid)
+    assert not _qa_contact_is_user({"accountId": "acc-1"}, "")
+
+
+def test_enrich_jira_qa_via_view_not_search(monkeypatch):
+    from status_overlook import enrich as enrich_mod
+
+    search_payload = [
+        {
+            "key": "RHOAIENG-82724",
+            "fields": {
+                "summary": "k8s name",
+                "status": {"name": "Testing"},
+                "assignee": {"accountId": "other"},
+                "labels": [],
+                "issuetype": {"name": "Bug"},
+            },
+        }
+    ]
+    view_payload = {
+        "fields": {
+            "issuelinks": [],
+            "customfield_10470": {"accountId": "me-account"},
+        }
+    }
+
+    def fake_run(cmd, **_kwargs):
+        class Proc:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        if "search" in cmd:
+            fields = cmd[cmd.index("--fields") + 1]
+            assert "customfield_" not in fields
+            Proc.stdout = json.dumps(search_payload)
+            return Proc()
+        if "view" in cmd:
+            fields = cmd[cmd.index("--fields") + 1]
+            assert "customfield_10470" in fields
+            assert "issuelinks" in fields
+            Proc.stdout = json.dumps(view_payload)
+            return Proc()
+        raise AssertionError(cmd)
+
+    monkeypatch.setattr(enrich_mod.subprocess, "run", fake_run)
+    cfg = AppConfig(
+        jira_site="redhat.atlassian.net",
+        jira_account_id="me-account",
+        jira_qa_contact_field="customfield_10470",
+    )
+    identity = Identity(github_login="x", jira_account_id="me-account")
+    out = enrich_jira_issues(["RHOAIENG-82724"], cfg=cfg, identity=identity)
+    snap, summary, url = out["RHOAIENG-82724"]
+    assert snap.qa_contact_is_user is True
+    assert snap.assignee_is_user is False
+    assert summary == "k8s name"
+    assert url.endswith("/browse/RHOAIENG-82724")
+
+
+def test_parse_acli_disallowed_field():
+    err = "✗ Error: field 'customfield_10470' is not allowed"
+    assert _parse_acli_disallowed_field(err) == "customfield_10470"
+    assert _parse_acli_disallowed_field("other failure") is None
+
+
+def test_acli_search_retries_without_disallowed_field(monkeypatch):
+    from status_overlook import enrich as enrich_mod
+
+    calls: list[str] = []
+
+    def fake_run(cmd, **_kwargs):
+        class Proc:
+            returncode = 0
+            stdout = "[]"
+            stderr = ""
+
+        fields = cmd[cmd.index("--fields") + 1]
+        calls.append(fields)
+        if "customfield_10470" in fields:
+            Proc.returncode = 1
+            Proc.stderr = "✗ Error: field 'customfield_10470' is not allowed"
+            Proc.stdout = ""
+        return Proc()
+
+    monkeypatch.setattr(enrich_mod.subprocess, "run", fake_run)
+    rows = _acli_workitem_search(
+        jql="key = X-1",
+        fields="key,summary,customfield_10470",
+        limit=1,
+    )
+    assert rows == []
+    assert calls[0] == "key,summary,customfield_10470"
+    assert calls[1] == "key,summary"

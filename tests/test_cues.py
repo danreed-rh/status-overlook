@@ -5,7 +5,7 @@ def test_unknown_reason_no_cue():
     assert cue_for("actionable", ["not_a_real_reason"]) is None
     assert cue_for("actionable", []) is None
     assert cue_for("done", ["jira_status_done"]) is None
-    assert cue_for("ignore", ["jira_testing_assignee_only"]) is None
+    assert cue_for("ignore", ["jira_not_assignee"]) is None
 
 
 def test_each_reason_maps():
@@ -28,6 +28,7 @@ def test_each_reason_maps():
         ("pending", "jira_epic_children_open", "wait_children", "Waiting on children"),
         ("pending", "jira_epic_children_unknown", "wait_children", "Waiting on children"),
         ("pending", "jira_in_review", "wait_review", "Waiting for review"),
+        ("pending", "jira_testing_assignee_only", "wait_test", "Testing"),
         ("pending", "github_waiting", "wait_review", "Waiting for review"),
         ("pending", "jira_unknown_status_assignee", "waiting", "Waiting"),
         ("blocked", "jira_blocked_by_unresolved", "blocked_by", "Blocked by issue"),

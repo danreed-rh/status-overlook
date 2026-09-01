@@ -107,7 +107,18 @@ An issue is **blocked** if **any** of these is true:
 3. **Flagged** impediment is set (Jira Software flag; providers map this to `flagged: true`)
 4. **Issue link** *is blocked by* points at an issue that is **not** terminal (status category `done`, or status name in `status_done`). Resolved/Closed blockers do not keep the issue blocked. Outward *blocks* links are ignored (those mean *this* issue blocks someone else).
 
-   Providers load links with `acli jira workitem view … --fields issuelinks` (acli **search** rejects `issuelinks`).
+   Providers load links with `acli jira workitem view … --fields issuelinks` (acli **search** rejects `issuelinks`). The same view call loads `qa_contact_field` and `pr_link_field` — search also rejects `customfield_*`.
+
+## Jira QA contact (Testing)
+
+`jira.qa_contact_field` (e.g. `customfield_10470`) is required to discover tickets where you are **QA contact** but not assignee.
+
+Each `run` asks Jira two questions:
+
+1. Assignee — `assignee = currentUser()` and unresolved.
+2. QA in Testing — QA field = you **and** status in `status_testing` (default: `Testing`). Skipped when `qa_contact_field` is empty.
+
+Classification: Testing + QA contact → **actionable**. Testing + assignee only → **pending** (cue **Testing**).
 
 ## Jira Review + merged PR
 

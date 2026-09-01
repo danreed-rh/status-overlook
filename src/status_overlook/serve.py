@@ -17,7 +17,6 @@ from urllib.parse import parse_qs, urlparse
 
 from status_overlook.config import load_config
 from status_overlook.digest import _iso_now, build_ui_digest, mark_read, write_digests
-from status_overlook.run import run_pipeline
 from status_overlook.store import load_store, save_store
 from status_overlook.working_hours import is_within_working_hours, should_skip_working_hours
 
@@ -59,7 +58,19 @@ def _run_pipeline_bg(
     try:
         _set_run_state(phase="running pipeline", log_tail="")
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
-            code = run_pipeline(
+            # Reload so UI Refresh picks up enrich.py without a serve restart.
+            import importlib
+
+            import status_overlook.classify_jira as classify_jira_mod
+            import status_overlook.cues as cues_mod
+            import status_overlook.enrich as enrich_mod
+            import status_overlook.run as run_mod
+
+            importlib.reload(classify_jira_mod)
+            importlib.reload(cues_mod)
+            importlib.reload(enrich_mod)
+            run_mod = importlib.reload(run_mod)
+            code = run_mod.run_pipeline(
                 skip_github=skip_github,
                 skip_jira=skip_jira,
                 skip_reconcile=skip_reconcile,

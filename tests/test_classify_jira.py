@@ -151,12 +151,13 @@ def test_testing_qa_contact_actionable():
     assert r.action == ActionState.ACTIONABLE
 
 
-def test_testing_assignee_only_not_actionable_or_pending():
+def test_testing_assignee_only_pending():
     r = classify_jira(
         JiraIssueSnapshot(key="X-1", status="Testing", assignee_is_user=True)
     )
-    assert r.action == ActionState.IGNORE
-    assert not r.should_track
+    assert r.action == ActionState.PENDING
+    assert r.should_track
+    assert "jira_testing_assignee_only" in r.reasons
 
 
 def test_testing_qa_only_actionable():

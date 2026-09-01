@@ -13,7 +13,7 @@
 |-------|------|
 | Action states | `actionable` \| `pending` \| `blocked` \| `done` \| `ignore` |
 | Jira Testing + QA contact | actionable |
-| Jira Testing + assignee only | ignore (not actionable, not pending) |
+| Jira Testing + assignee only | **pending** (`jira_testing_assignee_only`) — waiting on QA; cue **Testing** |
 | Jira blocked (any non-done status) | **blocked** |
 | Jira Review + assignee | **pending** (waiting on code review) |
 | Jira Review + assignee + linked PR **merged** | **actionable** (`jira_review_pr_merged`) — add testing notes / move to Testing, or resolve if no testing |
@@ -32,7 +32,7 @@
 | PR actionable labels | `lgtm` only (default) |
 | Blocked detection | **Any of:** status in `status_blocked` (default `Blocked`), label in `blocked_labels` (default `blocked`), Jira **Flagged** impediment, or **is blocked by** link to an **unresolved** (non-terminal) issue |
 | Show/digest Jira+PR grouping | Linked Jira+PR appear **once** in Actionable/Pending/Blocked. Pair via Jira `pr_link` or Jira key in PR title. Section = best action (`actionable` > `pending` > `blocked`). Primary = best-action member (open PR preferred over Jira when tied). Secondary shown as `↔ …`. Recently done ungrouped. |
-| Next-action / blocked cues | Display-only labels derived at present time from `reasons` (not new `action` states; not stored). Closed ids: `fix_ci`, `address_review`, `merge`, `review`, `test`, `follow_up`, `develop`, `wait_author`, `signed_off`, `wait_pr`, `wait_children`, `wait_review`, `waiting`, `blocked_by`, `flagged`, `jira_blocked`, `blocked_status`, `blocked_label`. First matching reason in priority order wins. Group cue = primary. Unknown / done / ignore → no cue. |
+| Next-action / blocked cues | Display-only labels derived at present time from `reasons` (not new `action` states; not stored). Closed ids: `fix_ci`, `address_review`, `merge`, `review`, `test`, `follow_up`, `develop`, `wait_author`, `signed_off`, `wait_pr`, `wait_children`, `wait_review`, `wait_test`, `waiting`, `blocked_by`, `flagged`, `jira_blocked`, `blocked_status`, `blocked_label`. First matching reason in priority order wins. Group cue = primary. Unknown / done / ignore → no cue. |
 | GitHub Issues | Discover `gh search issues --assignee=@me … is:issue` only (not author). Store id `github-issue:owner/repo#n`, source `github_issue`. PRs use `github-pr:…` / `github_pr` (legacy `github:` / `github` migrate on load). Closed→done; blocked label/Jira→blocked; open linked PR→pending; merged linked PR→actionable; else assignee open→actionable. Grouping also pairs Issue↔PR↔Jira via `pr_link`, PR `linked_issue_ids`, title Jira keys. |
 
 ## Open
