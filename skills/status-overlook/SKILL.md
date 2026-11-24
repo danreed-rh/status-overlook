@@ -63,6 +63,8 @@ If digests are stale and network is allowed, run `status-overlook run` then re-r
 - Sections: Actionable, Pending, Blocked, Recently done
 - Linked Jira+PR pairs appear **once**; primary key is the actionable side; secondary as `↔ …`
 - `●` / `unread` means `state_changed_at` after last `mark-read`
+- `state_changed_at` is the last successfully observed visible-state change, not the exact Jira/GitHub transition time. It also drives the rendered “in status for” age; reason-only changes do not reset it.
+- Linked Jira/PR items have independent `state_changed_at` values. Use the timestamp in `digest.json` for machine-readable status age; rendered durations are snapshots.
 - Epics may show `[Epic]` and sort lower in a section
 - `cue` on `digest.json` items (`id` / `label` / `kind`) is the next-action or blocked reason; `reasons` remains the machine audit trail. Prefer `cue.id` when summarizing what to do.
 

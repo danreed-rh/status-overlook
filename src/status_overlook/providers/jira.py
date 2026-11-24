@@ -34,10 +34,7 @@ def _acli_search(jql: str, *, fields: str, limit: int) -> list[dict]:
         err = (proc.stderr or proc.stdout or "acli failed").strip()
         hint = ""
         if any(x in err.lower() for x in ("auth", "unauthorized", "401", "login")):
-            hint = (
-                "Run: acli jira auth login --site <site>.atlassian.net "
-                "--email <you@example.com> --token"
-            )
+            hint = "Run: acli jira auth login --web"
         raise ProviderError(err, hint=hint)
     data = json.loads(proc.stdout or "[]")
     if not isinstance(data, list):

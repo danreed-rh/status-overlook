@@ -23,6 +23,27 @@ def _iso_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def status_age_label(
+    state_changed_at: str | None, *, now: datetime | None = None
+) -> str:
+    """Return whole days since the last observed visible-state change."""
+    try:
+        changed = parse_iso(state_changed_at)
+    except (TypeError, ValueError):
+        return ""
+    if changed is None:
+        return ""
+    if changed.tzinfo is None:
+        changed = changed.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    seconds = max(0, int((now - changed).total_seconds()))
+    if seconds < 86400:
+        return "<1d"
+    return f"{seconds // 86400}d"
+
+
 def is_unread(item: TrackedItem) -> bool:
     if not item.state_changed_at:
         return False
@@ -53,12 +74,8 @@ def _action_rank(action: str) -> int:
 def _is_open_github(item: TrackedItem) -> bool:
     if item.source != "github_pr":
         return False
-    status = (item.remote_status or "").casefold()
-    if "merged" in status:
-        return False
-    if status.startswith("closed"):
-        return False
-    return True
+    status = (item.remote_status or "").casefold().split("+", 1)[0]
+    return status in {"open", "draft"}
 
 
 def _primary_sort_key(item: TrackedItem) -> tuple[int, int, str]:
@@ -211,10 +228,39 @@ def _short_key(item: TrackedItem) -> str:
     return key
 
 
+_PR_STATUS_BASE = {
+    "open": "Open",
+    "draft": "Draft",
+    "closed": "Closed",
+    "merged": "Merged",
+}
+_PR_STATUS_FLAGS = {
+    "ci_fail": "CI failing",
+    "unresolved_threads": "Unresolved review threads",
+    "awaiting_author": "Awaiting author",
+}
+
+
+def ui_status_label(item: TrackedItem) -> str:
+    """Readable UI label; keep remote_status unchanged for storage and agents."""
+    raw = item.remote_status or ""
+    if item.source != "github_pr" or not raw:
+        return raw or "—"
+    base, *flags = raw.split("+")
+    if base not in _PR_STATUS_BASE or any(flag not in _PR_STATUS_FLAGS for flag in flags):
+        return raw
+    return " · ".join([_PR_STATUS_BASE[base], *(_PR_STATUS_FLAGS[flag] for flag in flags)])
+
+
 def _linked_note(linked: list[TrackedItem]) -> str:
     if not linked:
         return ""
-    parts = [f"↔ {_short_key(m)}" for m in linked]
+    parts = []
+    for item in linked:
+        age = status_age_label(item.state_changed_at)
+        status = item.remote_status or "—"
+        suffix = f" · {age}" if age else ""
+        parts.append(f"↔ {_short_key(item)} [{status}{suffix}]")
     return " " + " ".join(parts)
 
 
@@ -227,9 +273,13 @@ def _format_line(item: TrackedItem, linked: list[TrackedItem] | None = None) -> 
     cue_note = f" ({cue.label})" if cue else ""
     link = f" — {item.url}" if item.url else ""
     changed = item.state_changed_at or "—"
+    age = status_age_label(item.state_changed_at)
+    status = item.remote_status or "—"
+    if age:
+        status = f"{status} · {age}"
     return (
         f"- [{item.action or '?'}]{unread} **{item.key}**{epic}{link_note} "
-        f"[{item.remote_status}] {item.summary}{cue_note}  \n"
+        f"[{status}] {item.summary}{cue_note}  \n"
         f"  state_changed: {changed}{link}"
     )
 
@@ -247,6 +297,7 @@ def _item_ui_dict(item: TrackedItem) -> dict:
         "url": item.url,
         "summary": item.summary,
         "remote_status": item.remote_status,
+        "display_status": ui_status_label(item),
         "action": item.action,
         "issue_type": item.issue_type,
         "epic": is_jira_epic(item),
@@ -259,11 +310,13 @@ def _item_ui_dict(item: TrackedItem) -> dict:
 
 def _group_ui_dict(group: WorkGroup) -> dict:
     primary = _item_ui_dict(group.primary)
+    status_item = next((m for m in group.members if _is_open_github(m)), group.primary)
     return {
         "action": group.action,
         "unread": group.is_unread(),
         "state_changed_at": group.state_changed_at,
         "cue": primary.get("cue"),
+        "status_item_id": status_item.id,
         "primary": primary,
         "linked": [_item_ui_dict(m) for m in group.linked],
     }

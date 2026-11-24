@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from status_overlook.fsutil import ensure_private_dir, write_private_text
 from status_overlook.paths import data_dir, track_store_path
+import status_overlook.state as state_mod
 
 STORE_SCHEMA_VERSION = 1
 SourceName = Literal["jira", "github_pr", "github_issue"]
@@ -93,7 +94,7 @@ class TrackedItem:
         if source == "github_issue" and not item_id.startswith("github-issue:"):
             key = str(data.get("key") or "")
             item_id = f"github-issue:{key}" if key else item_id
-        return cls(
+        item = cls(
             id=item_id,
             source=source,
             key=str(data["key"]),
@@ -116,6 +117,33 @@ class TrackedItem:
             state_fingerprint=str(data.get("state_fingerprint") or ""),
             remote_updated_at=str(data.get("remote_updated_at") or ""),
         )
+        # Migrate the legacy reason-inclusive fingerprint before reconcile can
+        # replace remote_status with the discovery-only value. Preserve the
+        # existing timestamp so loading/migrating the store never restarts age.
+        if item.state_changed_at and not state_mod.is_current_state_fingerprint(
+            item.state_fingerprint
+        ):
+            item.state_fingerprint = state_mod.state_fingerprint(
+                action=item.action,
+                lifecycle=item.lifecycle,
+                remote_status=item.remote_status,
+                blocked=item.blocked,
+                reasons=item.reasons,
+            )
+        return item
+
+
+def _record_visible_state(item: TrackedItem, now_s: str) -> None:
+    fingerprint = state_mod.state_fingerprint(
+        action=item.action,
+        lifecycle=item.lifecycle,
+        remote_status=item.remote_status,
+        blocked=item.blocked,
+        reasons=item.reasons,
+    )
+    if fingerprint != item.state_fingerprint or not item.state_changed_at:
+        item.state_changed_at = now_s
+        item.state_fingerprint = fingerprint
 
 
 @dataclass
@@ -198,12 +226,15 @@ def reconcile(
     pin_ids: set[str] | None = None,
     now: datetime | None = None,
     retention_days: int = 7,
+    defer_lifecycle: bool = False,
 ) -> tuple[TrackStore, ReconcileStats]:
     """Merge provider candidates into the track store.
 
     - New candidates → active
     - Existing candidates → refresh last_seen / summary
-    - Active items missing from candidates (and not pinned) → done
+    - Existing done candidates → active unless lifecycle changes are deferred
+    - Active items missing from candidates (and not pinned) → done unless
+      lifecycle changes are deferred
     - Done items older than retention_days → pruned
     - Pins stay active even if absent from candidates
     """
@@ -238,35 +269,48 @@ def reconcile(
 
         existing.summary = cand.summary or existing.summary
         existing.url = cand.url or existing.url
-        existing.remote_status = cand.remote_status or existing.remote_status
         existing.last_seen_at = now_s
         existing.pinned = existing.pinned or cid in pin_ids
         # IGNORE items stay done while still in discovery (e.g. not assignee)
         if existing.lifecycle == "done" and existing.action == "ignore" and not existing.pinned:
             stats.refreshed.append(cid)
             continue
-        if existing.lifecycle == "done":
+        if existing.lifecycle == "done" and not defer_lifecycle:
             existing.lifecycle = "active"
             existing.finished_at = None
+            _record_visible_state(existing, now_s)
+        # Keep the last enriched visible state until enrichment confirms the
+        # candidate's current status and classification. Discovery may provide
+        # only a provisional status (GitHub PR search, for example, says open).
         stats.refreshed.append(cid)
 
-    for iid, item in list(store.items.items()):
-        if item.lifecycle != "active":
-            continue
-        if iid in by_id:
-            continue
-        if item.pinned or iid in pin_ids:
-            item.pinned = True
-            stats.pinned_kept.append(iid)
-            continue
-        item.lifecycle = "done"
-        item.finished_at = now_s
-        item.last_seen_at = now_s
-        stats.finished.append(iid)
+    if not defer_lifecycle:
+        for iid, item in list(store.items.items()):
+            if item.lifecycle != "active":
+                continue
+            if iid in by_id:
+                continue
+            if item.pinned or iid in pin_ids:
+                item.pinned = True
+                stats.pinned_kept.append(iid)
+                continue
+            item.lifecycle = "done"
+            item.finished_at = now_s
+            item.last_seen_at = now_s
+            _record_visible_state(item, now_s)
+            stats.finished.append(iid)
 
     cutoff = now - timedelta(days=retention_days)
     for iid, item in list(store.items.items()):
         if item.lifecycle != "done":
+            continue
+        if (
+            defer_lifecycle
+            and iid in by_id
+            and (item.action != "ignore" or item.pinned)
+        ):
+            # A staged full refresh must let enrichment decide whether a
+            # rediscovered item is active before retention can remove it.
             continue
         finished = parse_iso(item.finished_at)
         if finished is not None and finished < cutoff:

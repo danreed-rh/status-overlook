@@ -45,8 +45,15 @@ def run_reconcile(
     skip_github: bool = False,
     skip_jira: bool = False,
     dry_run: bool = False,
+    persist: bool = True,
+    defer_lifecycle: bool = False,
 ) -> tuple[TrackStore, ReconcileStats, int]:
-    """Return store, stats, exit code."""
+    """Return staged or persisted store, stats, and exit code.
+
+    ``persist=False`` lets the full pipeline commit only after enrichment.
+    ``defer_lifecycle=True`` keeps discovery from changing lifecycle before
+    enrichment confirms the current visible state.
+    """
     cfg, cfg_path = load_config()
     if cfg_path is None:
         print("No config file found; using defaults.")
@@ -85,10 +92,14 @@ def run_reconcile(
         candidates,
         pin_ids=_pin_ids(cfg),
         retention_days=cfg.done_retention_days,
+        defer_lifecycle=defer_lifecycle,
     )
     if not dry_run:
-        path = save_store(store)
-        print(f"Wrote {path}")
+        if persist:
+            path = save_store(store)
+            print(f"Wrote {path}")
+        else:
+            print("Store write deferred until enrichment")
     else:
         print("Dry run — store not written")
 

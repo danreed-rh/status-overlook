@@ -7,6 +7,20 @@
 | D0–D5 | Name, repo, gh+acli, Apache-2.0, Mac paths, uninstall | 2026-08-07 |
 | D1b | GitHub remote: https://github.com/danreed-rh/status-overlook | 2026-08-07 |
 
+## Observed status age
+
+- Reuse `state_changed_at` as the start of the latest **visible** state observed by a successful refresh. Do not add a separate age timer or query remote history.
+- Reset on lifecycle, action, remote-status, or displayed cue changes. Ignore reason-only changes when the displayed state remains the same.
+- This is an observation timestamp, not the exact transition time from Jira or GitHub. Changes that occur and revert between refreshes are not observable and do not reset it.
+- Derive duration at render time. For linked Jira/PR items, retain independent timestamps; terminal and Markdown display each member’s age.
+- My Work alone shows linked keys on the same line and a single status age. While a grouped PR is open (including draft), the displayed status and age come from that PR even if Jira is the action-ranked primary. Otherwise use the primary’s status and age. Keep each item’s timestamp in the store and API; terminal and Markdown continue to show independent ages.
+
+## Local Team review
+
+- The user approved the Razzmatazz Kanban board (11803, saved filter 119995) solely to seed an initial roster of seven verified GitHub usernames. Future refreshes use the saved local roster; they do not query Jira for membership.
+- Track open, non-draft, `REVIEW_REQUIRED` PRs by saved author across all repositories visible to this GitHub account. Unassigned means **no GitHub assignees**. LGTM requires the `lgtm` label, outstanding required review, and current user Maintain/Admin access to the base repo. An overlapping PR appears once in LGTM, with an Unassigned badge.
+- Keep the team queue separate from the personal store/digests. Show locally observed time in the current queue; changing queues resets the clock. Team fetch failure preserves the last successful queue, with a visible error.
+
 ## Phase 1 classification (updated Gate 1)
 
 | Topic | Rule |

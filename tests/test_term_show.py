@@ -90,6 +90,36 @@ def test_format_hides_empty_sections_and_omits_ansi_when_color_false():
     assert "Act now" in text or "Act now with" in text
 
 
+def test_format_includes_status_age_and_linked_status_age():
+    store = TrackStore(
+        items={
+            "github-pr:org/repo#4": _item(
+                id="github-pr:org/repo#4",
+                source="github_pr",
+                key="org/repo#4",
+                summary="Fix CI",
+                remote_status="open+ci_fail",
+                state_changed_at="2026-08-10T10:00:00Z",
+                action="actionable",
+                reasons=["github_ci_failed"],
+            ),
+            "jira:PAIR-4": _item(
+                id="jira:PAIR-4",
+                key="PAIR-4",
+                summary="linked Jira",
+                remote_status="In Progress",
+                state_changed_at="2026-08-05T10:00:00Z",
+                action="pending",
+                reasons=["jira_in_review"],
+                pr_link="https://github.com/org/repo/pull/4",
+            ),
+        }
+    )
+    text = format_terminal_digest(store, width=120, color=False)
+    assert "open+ci_fail · " in text
+    assert "↔ PAIR-4  In Progress · " in text
+
+
 def test_verbose_includes_reasons_and_url():
     store = TrackStore(
         items={

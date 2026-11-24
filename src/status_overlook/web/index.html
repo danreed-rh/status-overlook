@@ -7,53 +7,55 @@
   <title>Status Overlook</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
-<body>
-  <header class="top">
-    <div class="brand">
-      <h1>Status Overlook</h1>
-      <p class="meta" id="meta">Loading…</p>
-    </div>
-    <div class="controls">
-      <label>
-        View
-        <select id="view">
-          <option value="actionable">Actionable</option>
-          <option value="all" selected>All active</option>
-          <option value="everything">Everything</option>
-          <option value="pending">Pending</option>
-          <option value="blocked">Blocked</option>
-          <option value="done">Recently done</option>
-        </select>
-      </label>
-      <label>
-        Source
-        <select id="source">
-          <option value="both" selected>Jira + GitHub</option>
-          <option value="github">GitHub (PRs + Issues)</option>
-          <option value="github_pr">GitHub PRs</option>
-          <option value="github_issue">GitHub Issues</option>
-          <option value="jira">Jira only</option>
-        </select>
-      </label>
-      <label class="check">
-        <input type="checkbox" id="sinceRead" />
-        Unread only
-      </label>
-      <label>
-        Auto-refresh
-        <select id="interval">
-          <option value="0" selected>Off (manual / OS scheduler)</option>
-          <option value="60">Every 1 min</option>
-          <option value="300">Every 5 min</option>
-          <option value="900">Every 15 min</option>
-        </select>
-      </label>
-      <button type="button" id="btnRun">Refresh now</button>
-      <button type="button" id="btnMark" class="secondary">Mark all read</button>
-    </div>
-  </header>
-  <p class="status-line" id="runStatus" hidden role="status" aria-live="polite"></p>
-  <main id="main"></main>
+<body data-page="personal">
+  <!-- GLOBAL_HEADER -->
+  <div class="page-layout">
+    <section class="page-toolbar personal-toolbar" aria-labelledby="personalTitle">
+      <div class="page-lead">
+        <p class="page-eyebrow">PERSONAL QUEUE · JIRA + GITHUB</p>
+        <h2 id="personalTitle">My work</h2>
+        <p class="meta" id="meta">Loading…</p>
+      </div>
+      <div class="controls">
+        <label>
+          View
+          <select id="view">
+            <option value="actionable">Actionable</option>
+            <option value="all" selected>All active</option>
+            <option value="everything">Everything</option>
+            <option value="pending">Pending</option>
+            <option value="blocked">Blocked</option>
+            <option value="done">Recently done</option>
+          </select>
+        </label>
+        <label>
+          Source
+          <select id="source">
+            <option value="both" selected>Jira + GitHub</option>
+            <option value="github">GitHub (PRs + Issues)</option>
+            <option value="github_pr">GitHub PRs</option>
+            <option value="github_issue">GitHub Issues</option>
+            <option value="jira">Jira only</option>
+          </select>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="sinceRead" />
+          Unread only
+        </label>
+        <label>
+          Auto-refresh
+          <select id="interval">
+            <option value="0" selected>Off (manual / OS scheduler)</option>
+            <option value="60">Every 1 min</option>
+            <option value="300">Every 5 min</option>
+            <option value="900">Every 15 min</option>
+          </select>
+        </label>
+        <button type="button" id="btnMark" class="secondary">Mark all read</button>
+      </div>
+    </section>
+    <main id="main"><p class="loading">Loading My Work…</p></main>
+  </div>
   <footer>
     <p>
       Local UI only · open <code id="uiOrigin"></code>
@@ -62,6 +64,7 @@
       <code>status-overlook show --plain</code>
     </p>
   </footer>
+  <script src="/static/header.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

@@ -134,6 +134,14 @@ def track_store_path() -> Path:
     return data_dir() / "track_store.json"
 
 
+def team_members_path() -> Path:
+    return data_dir() / "team_members.json"
+
+
+def team_queue_path() -> Path:
+    return data_dir() / "team_queue.json"
+
+
 def digest_md_path() -> Path:
     return cache_dir() / "digest.md"
 

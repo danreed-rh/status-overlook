@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import subprocess
@@ -21,6 +20,7 @@ from status_overlook.models import (
     JiraIssueSnapshot,
 )
 from status_overlook.store import TrackStore, TrackedItem, _iso, _utcnow
+from status_overlook.state import state_fingerprint
 
 _JIRA_KEY_RE = re.compile(r"\b([A-Z][A-Z0-9]+-\d+)\b")
 # Prow/ODH style approval comment; not the label name alone
@@ -111,26 +111,6 @@ def resolve_identity(cfg: AppConfig) -> Identity:
         except RuntimeError:
             account_id = ""
     return Identity(github_login=login, jira_account_id=account_id)
-
-
-def state_fingerprint(
-    *,
-    action: str,
-    lifecycle: str,
-    remote_status: str,
-    blocked: bool,
-    reasons: list[str] | tuple[str, ...],
-) -> str:
-    payload = "|".join(
-        [
-            action,
-            lifecycle,
-            remote_status,
-            "1" if blocked else "0",
-            ",".join(sorted(reasons)),
-        ]
-    )
-    return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
 def _ci_failed(rollup: list[dict] | None) -> bool:

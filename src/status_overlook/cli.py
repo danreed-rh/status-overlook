@@ -6,10 +6,24 @@ import argparse
 import sys
 
 from status_overlook import __version__
-from status_overlook.digest import build_digest_markdown, is_unread, mark_read, write_digests
+from status_overlook.digest import (
+    _format_group_line,
+    _section_groups,
+    build_digest_markdown,
+    is_unread,
+    mark_read,
+    status_age_label,
+    write_digests,
+)
 from status_overlook.doctor import print_doctor, run_doctor
 from status_overlook.init import run_init
-from status_overlook.paths import all_managed_paths, digest_md_path, track_store_path
+from status_overlook.paths import (
+    all_managed_paths,
+    digest_md_path,
+    team_members_path,
+    team_queue_path,
+    track_store_path,
+)
 from status_overlook.reconcile import run_reconcile
 from status_overlook.run import run_pipeline
 from status_overlook.scheduler import install_scheduler, uninstall_scheduler
@@ -157,6 +171,8 @@ def main(argv: list[str] | None = None) -> int:
             print(path)
         print(f"track_store: {track_store_path()}")
         print(f"digest: {digest_md_path()}")
+        print(f"team_members: {team_members_path()}")
+        print(f"team_queue: {team_queue_path()}")
         return 0
 
     if args.command == "reconcile":
@@ -189,47 +205,45 @@ def main(argv: list[str] | None = None) -> int:
                 pin = " pin" if item.pinned else ""
                 unread = " ●" if is_unread(item) else ""
                 action = item.action or "-"
+                age = status_age_label(item.state_changed_at)
+                status = item.remote_status or "—"
+                if age:
+                    status = f"{status} · {age}"
                 print(
                     f"{item.lifecycle:6} {action:10}{unread}{pin}  {item.id}  "
-                    f"[{item.remote_status}]  {item.summary[:70]}"
+                    f"[{status}]  {item.summary[:70]}"
                 )
             return 0
 
         md = build_digest_markdown(store)
         if getattr(args, "plain", False):
-            if args.since_read or args.section:
-                from status_overlook.digest import _format_group_line, _section_groups
-
-                sections = (
-                    [
-                        ("Actionable", "actionable"),
-                        ("Pending", "pending"),
-                        ("Blocked", "blocked"),
-                        ("Recently done", "done"),
-                    ]
-                    if not args.section
-                    else [(args.section.title(), args.section)]
-                )
-                lines = ["# Status Overlook", ""]
-                for title, action in sections:
-                    groups = _section_groups(store, action)
-                    if args.since_read:
-                        groups = [g for g in groups if g.is_unread()]
-                    lines.append(f"## {title}")
-                    lines.append("")
-                    if not groups:
-                        lines.append("_None_")
-                    else:
-                        for group in groups:
-                            lines.append(_format_group_line(group))
-                    lines.append("")
-                print("\n".join(lines).rstrip())
-            else:
-                path = digest_md_path()
-                if path.is_file():
-                    print(path.read_text(encoding="utf-8"), end="")
+            if not args.since_read and not args.section:
+                print(md, end="")
+                return 0
+            sections = (
+                [
+                    ("Actionable", "actionable"),
+                    ("Pending", "pending"),
+                    ("Blocked", "blocked"),
+                    ("Recently done", "done"),
+                ]
+                if not args.section
+                else [(args.section.title(), args.section)]
+            )
+            lines = ["# Status Overlook", ""]
+            for title, action in sections:
+                groups = _section_groups(store, action)
+                if args.since_read:
+                    groups = [g for g in groups if g.is_unread()]
+                lines.append(f"## {title}")
+                lines.append("")
+                if not groups:
+                    lines.append("_None_")
                 else:
-                    print(md, end="")
+                    for group in groups:
+                        lines.append(_format_group_line(group))
+                lines.append("")
+            print("\n".join(lines).rstrip())
             return 0
 
         from status_overlook.term_show import format_terminal_digest, use_color

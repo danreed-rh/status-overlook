@@ -41,7 +41,7 @@ Legacy: `source=github` / `github:…` for PRs migrates on load via `store.norma
 
 ## Timestamps (do not conflate)
 
-- `state_changed_at` — last derived-state change (action, blocked, remote status). No-op runs must **not** bump it.
+- `state_changed_at` — last successfully observed visible-state change (lifecycle, action, remote status, or displayed cue). No-op runs and reason-only changes must **not** bump it; rendered age is derived from this timestamp.
 - `last_read_at` — user/agent mark-read; unread when `state_changed_at` is after this.
 
 ## Action states

@@ -12,13 +12,15 @@ from status_overlook.enrich import (
     _qa_contact_is_user,
     _status_is_terminal,
     _user_gave_lgtm,
+    apply_classification_to_item,
     blocked_by_unresolved_from_fields,
     enrich_jira_issues,
     github_remote_status,
     normalize_github_pr_state,
     parse_github_pr_url,
 )
-from status_overlook.models import ClassifyConfig, GitHubPrSnapshot
+from status_overlook.models import ActionState, ClassifyConfig, GitHubPrSnapshot
+from status_overlook.store import TrackedItem
 
 
 def test_merged_state_is_closed_merged():
@@ -64,6 +66,167 @@ def test_remote_status_unresolved_threads():
         has_unresolved_reviews=True,
     )
     assert github_remote_status(snap) == "open+unresolved_threads"
+
+
+def test_state_changed_at_tracks_visible_transitions_not_reason_only_changes():
+    item = TrackedItem(
+        id="github-pr:org/repo#4",
+        source="github_pr",
+        key="org/repo#4",
+        lifecycle="active",
+    )
+
+    assert apply_classification_to_item(
+        item,
+        action=ActionState.ACTIONABLE,
+        lifecycle="active",
+        remote_status="open+ci_fail",
+        blocked=False,
+        reasons=("github_ci_failed",),
+        now_s="2026-08-10T10:00:00Z",
+    )
+    assert item.state_changed_at == "2026-08-10T10:00:00Z"
+
+    assert apply_classification_to_item(
+        item,
+        action=ActionState.ACTIONABLE,
+        lifecycle="active",
+        remote_status="open",
+        blocked=False,
+        reasons=("internal_signal_one",),
+        now_s="2026-08-10T11:00:00Z",
+    )
+    assert item.state_changed_at == "2026-08-10T11:00:00Z"
+
+    assert not apply_classification_to_item(
+        item,
+        action=ActionState.ACTIONABLE,
+        lifecycle="active",
+        remote_status="open",
+        blocked=False,
+        reasons=("internal_signal_two",),
+        now_s="2026-08-10T12:00:00Z",
+    )
+    assert item.state_changed_at == "2026-08-10T11:00:00Z"
+
+    # Same remote status and action, but the displayed cue changes to Fix CI.
+    assert apply_classification_to_item(
+        item,
+        action=ActionState.ACTIONABLE,
+        lifecycle="active",
+        remote_status="open",
+        blocked=False,
+        reasons=("github_ci_failed",),
+        now_s="2026-08-10T13:00:00Z",
+    )
+    assert item.state_changed_at == "2026-08-10T13:00:00Z"
+
+
+def test_jira_status_round_trip_resets_on_each_observed_transition():
+    item = TrackedItem(
+        id="jira:PAIR-1",
+        source="jira",
+        key="PAIR-1",
+        lifecycle="active",
+    )
+    transitions = (
+        ("In Progress", "2026-08-10T10:00:00Z"),
+        ("In Review", "2026-08-10T11:00:00Z"),
+        ("In Progress", "2026-08-10T12:00:00Z"),
+    )
+    for status, now_s in transitions:
+        changed = apply_classification_to_item(
+            item,
+            action=ActionState.ACTIONABLE,
+            lifecycle="active",
+            remote_status=status,
+            blocked=False,
+            reasons=("jira_active_assignee",),
+            now_s=now_s,
+        )
+        assert changed
+        assert item.state_changed_at == now_s
+
+
+def test_pr_workflow_round_trip_resets_on_each_observed_transition():
+    item = TrackedItem(
+        id="github-pr:org/repo#5",
+        source="github_pr",
+        key="org/repo#5",
+        lifecycle="active",
+    )
+    transitions = (
+        (
+            "open+unresolved_threads",
+            ActionState.ACTIONABLE,
+            ("github_unresolved_reviews",),
+            "2026-08-10T10:00:00Z",
+        ),
+        (
+            "open+awaiting_author",
+            ActionState.PENDING,
+            ("github_assignee_waiting_on_author",),
+            "2026-08-10T11:00:00Z",
+        ),
+        (
+            "open+unresolved_threads",
+            ActionState.ACTIONABLE,
+            ("github_unresolved_reviews",),
+            "2026-08-10T12:00:00Z",
+        ),
+    )
+    for remote_status, action, reasons, now_s in transitions:
+        changed = apply_classification_to_item(
+            item,
+            action=action,
+            lifecycle="active",
+            remote_status=remote_status,
+            blocked=False,
+            reasons=reasons,
+            now_s=now_s,
+        )
+        assert changed
+        assert item.state_changed_at == now_s
+
+
+def test_failed_pr_enrichment_preserves_observed_state(monkeypatch):
+    from status_overlook.config import AppConfig
+    from status_overlook.enrich import enrich_and_classify_store, state_fingerprint
+    from status_overlook.store import TrackStore
+
+    item = TrackedItem(
+        id="github-pr:org/repo#6",
+        source="github_pr",
+        key="org/repo#6",
+        lifecycle="active",
+        action="actionable",
+        remote_status="open+ci_fail",
+        reasons=["github_ci_failed"],
+        state_changed_at="2026-08-10T10:00:00Z",
+    )
+    item.state_fingerprint = state_fingerprint(
+        action=item.action,
+        lifecycle=item.lifecycle,
+        remote_status=item.remote_status,
+        blocked=item.blocked,
+        reasons=item.reasons,
+    )
+    store = TrackStore(items={item.id: item})
+    before = (item.action, item.lifecycle, item.remote_status, item.state_changed_at)
+
+    monkeypatch.setattr(
+        "status_overlook.enrich.resolve_identity",
+        lambda _cfg: Identity(github_login="me", jira_account_id=""),
+    )
+    monkeypatch.setattr("status_overlook.enrich.enrich_jira_issues", lambda *a, **k: {})
+
+    def fail_enrichment(*_args, **_kwargs):
+        raise RuntimeError("temporary gh error")
+
+    monkeypatch.setattr("status_overlook.enrich.enrich_github_pr", fail_enrichment)
+    enrich_and_classify_store(store, AppConfig())
+
+    assert (item.action, item.lifecycle, item.remote_status, item.state_changed_at) == before
 
 
 def test_probe_pr_review_threads_any_and_mine(monkeypatch):

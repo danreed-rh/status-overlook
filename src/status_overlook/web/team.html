@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark light" />
+  <title>Team Review · Status Overlook</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/team.css" />
+</head>
+<body class="team-page" data-page="team">
+  <!-- GLOBAL_HEADER -->
+  <main class="page-layout team-main">
+    <section class="page-toolbar team-hero" aria-labelledby="teamTitle">
+      <div class="page-lead">
+        <p class="page-eyebrow">TEAM RADAR · GITHUB PULL REQUESTS</p>
+        <h2 id="teamTitle">Team review queue</h2>
+        <p>Open PRs from your saved teammates that still require review. A separate view of work you might be able to unblock.</p>
+      </div>
+      <div class="team-hero-meta">
+        <span id="teamCounts">Loading…</span>
+        <span id="teamUpdated"></span>
+        <span id="teamMeta">Loading team queue…</span>
+      </div>
+    </section>
+    <p class="status-line team-notice" id="teamStatus" hidden role="status" aria-live="polite"></p>
+    <details class="team-members" id="memberEditor">
+      <summary>Team members <span id="memberCount"></span> · Edit roster</summary>
+      <p>The roster is saved locally. Changes to PR results appear on the next refresh.</p>
+      <form id="memberForm">
+        <label for="memberLogin">GitHub username</label>
+        <input id="memberLogin" name="login" autocomplete="off" required maxlength="39" />
+        <button type="submit">Add member</button>
+      </form>
+      <ul id="memberList" aria-label="Tracked GitHub members"></ul>
+    </details>
+    <div class="team-columns" id="teamSections"><p class="team-empty team-setup">Loading Team Review…</p></div>
+  </main>
+  <footer>Local team view · Reads GitHub; does not request reviews or change pull requests.</footer>
+  <script src="/static/header.js"></script>
+  <script src="/static/team.js"></script>
+</body>
+</html>

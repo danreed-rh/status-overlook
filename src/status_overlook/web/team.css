@@ -1,0 +1,230 @@
+/* Team identity within the shared Status Overlook shell and card system. */
+.team-page {
+  --team-violet: #bca9ff;
+  --team-teal: #81e6d9;
+  --team-surface: var(--surface);
+}
+
+.team-hero {
+  position: relative;
+  overflow: hidden;
+  border-left-color: var(--team-violet);
+  background: linear-gradient(115deg, #29273f, #19343c);
+}
+
+.team-hero .page-eyebrow {
+  color: var(--team-teal);
+}
+
+.team-hero .page-lead {
+  max-width: 45rem;
+}
+
+.team-hero .page-lead > p:not(.page-eyebrow) {
+  color: #e1e9f1;
+  margin: 0.35rem 0 0;
+}
+
+.team-hero-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.2rem;
+  text-align: right;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--team-teal);
+}
+
+.team-members {
+  border: 1px solid var(--line);
+  background: var(--team-surface);
+  padding: 0.7rem 1rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.team-members summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.team-members p {
+  color: var(--muted);
+}
+
+#memberForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+#memberLogin {
+  min-width: 12rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.4rem;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+
+#memberList {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+#memberList li:not(.team-empty) {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--line);
+  padding: 0.3rem 0.45rem;
+  border-radius: 0.4rem;
+}
+
+#memberList a, .team-pr-key, .team-pr-title, .team-author {
+  color: var(--team-teal);
+}
+
+.member-remove {
+  padding: 0.15rem 0.35rem;
+  background: transparent;
+  border-color: var(--line);
+}
+
+.team-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 1.25rem;
+  min-height: calc(100vh - 19rem);
+}
+
+.team-section {
+  border-left: 4px solid var(--team-teal);
+  border-radius: 0 4px 4px 0;
+  background: color-mix(in srgb, var(--team-teal) 7%, var(--surface));
+  overflow: hidden;
+}
+
+.team-section-lgtm {
+  border-left-color: var(--team-violet);
+  background: color-mix(in srgb, var(--team-violet) 7%, var(--surface));
+}
+
+.team-section-head {
+  padding: 0.6rem 0.75rem 0.45rem;
+}
+
+.team-section-head h3 {
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--team-teal);
+  margin: 0;
+}
+
+.team-section-lgtm .team-section-head h3 { color: var(--team-violet); }
+
+.team-section-head h3 span {
+  color: var(--muted);
+  font-weight: 450;
+}
+
+.team-section-head p {
+  color: var(--muted);
+  margin: 0.3rem 0 0;
+  font-size: 0.85rem;
+}
+
+.team-card {
+  padding: 0.7rem 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.team-card-head, .team-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.25rem 0.7rem;
+}
+
+.team-pr-key {
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.team-pr-title {
+  display: block;
+  margin: 0.3rem 0 0.6rem;
+  font-size: 1.03rem;
+  font-weight: 550;
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.team-pr-title:hover, .team-pr-key:hover, .team-author:hover {
+  text-decoration: underline;
+}
+
+.team-age {
+  color: var(--fg);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.team-card-foot {
+  align-items: center;
+  justify-content: flex-start;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.team-signal {
+  padding: 0.12rem 0.42rem;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  color: var(--fg);
+}
+
+.team-empty {
+  padding: 0.9rem 1.2rem;
+  color: var(--muted);
+}
+
+.team-setup {
+  grid-column: 1 / -1;
+  background: var(--team-surface);
+  border: 1px solid var(--team-violet);
+  border-radius: 0.5rem;
+}
+
+.team-error {
+  background: color-mix(in srgb, var(--blocked) 18%, var(--surface));
+}
+
+@media (max-width: 760px) {
+  .team-columns { grid-template-columns: 1fr; }
+  .team-hero-meta { align-items: flex-start; text-align: left; }
+}
+
+@media (prefers-color-scheme: light) {
+  .team-page {
+    --team-violet: #513b86;
+    --team-teal: #075f64;
+  }
+  .team-hero {
+    background: linear-gradient(115deg, #e6dcfa, #d2eff0);
+  }
+  .team-hero .page-lead > p:not(.page-eyebrow) { color: #283445; }
+}
+
+@media (forced-colors: active) {
+  .team-hero, .team-section, .team-members { border-left-width: 6px; }
+  .team-hero { background: Canvas; }
+}

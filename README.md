@@ -13,12 +13,13 @@ Uses the `gh` and `acli` CLIs (prompts to install or log in when needed). Writes
 - Optional OS user scheduler: macOS LaunchAgent, Linux systemd user timer, Windows Task Scheduler
 - Terminal `show` and markdown digests for agents (`show --plain`)
 - Optional **local** web UI (`status-overlook serve` — localhost only)
+- Separate local **Team review** page for review-required PRs from a saved GitHub roster
 
 ## Out of scope for this release
 
 - Slack, email, or chat integrations
 - Writing back to Jira or GitHub (read and classify only)
-- Team multi-user boards or shared cluster hosting (deferred)
+- Shared multi-user boards or cluster hosting (deferred)
 - Binding the UI off localhost / remote hosting
 - Replacing your Mac/Linux/Windows user-domain paths with system-wide installs
 
@@ -45,11 +46,14 @@ Then: `gh auth login`.
 
 ### 2. Atlassian CLI (`acli`)
 
-Install from the [acli install guide](https://developer.atlassian.com/cloud/acli/guides/install-acli/). Put the binary on `PATH` (`~/.local/bin` on Linux; user PATH on Windows). Create a Jira API token at [id.atlassian.com](https://id.atlassian.com/manage-profile/security/api-tokens), then:
+Install from the [acli install guide](https://developer.atlassian.com/cloud/acli/guides/install-acli/). Put the binary on `PATH` (`~/.local/bin` on Linux; user PATH on Windows). Authenticate in your browser:
 
 ```bash
-acli jira auth login --site YOUR.atlassian.net --email YOU@example.com --token
+acli jira auth login --web
+acli jira auth status
 ```
+
+For API-token authentication instead, create a token at [id.atlassian.com](https://id.atlassian.com/manage-profile/security/api-tokens), save it to a private file, and run `acli jira auth login --site YOUR.atlassian.net --email YOU@example.com --token < token.txt`. `--token` reads standard input; `--site` belongs to `auth login`, not `auth status`.
 
 ### 3. Status Overlook
 
@@ -105,6 +109,8 @@ status-overlook serve --open   # optional local UI (Chrome/Firefox/Edge/Safari)
 
 Open the UI at **`http://127.0.0.1:8765/`**. On Windows, `http://localhost:8765/` can hit IPv6 (`::1`) and miss a server bound to IPv4.
 
+The **Team review** tab at `/team` shows two read-only GitHub queues for saved teammates: open, non-draft, review-required PRs with no GitHub assignee, and LGTM-labeled PRs still requiring review in repositories where your account has Maintain/Admin permission. The second queue does not claim GitHub requires a particular maintainer to approve. Add/remove GitHub usernames in its roster editor; the seven verified initial members are seeded locally on the owner machine. Regular `run`/UI Refresh updates this separate cache, even if the personal Jira work fails. Team fetch failures leave the personal digest and previous team results intact. See [team review design](docs/TEAM_REVIEW.md).
+
 ### Optional scheduler
 
 ```bash
@@ -159,6 +165,10 @@ status-overlook serve [--host 127.0.0.1] [--port 8765] [--open] [--ignore-workin
 ## Agents
 
 Coding agents should read **local** digest files (or run `status-overlook show --plain`), not a remote UI. See [`skills/status-overlook/SKILL.md`](skills/status-overlook/SKILL.md).
+
+Rendered items show elapsed time in their latest observed visible state. This age is derived from `state_changed_at`, resets when lifecycle, Jira/GitHub status, or Status Overlook’s displayed action/cue changes, and does not query remote history. `digest.json` exposes the timestamp for machine-readable use.
+
+The browser shows readable PR status labels and right-aligned status ages. Raw `remote_status` tokens remain available in `digest.json` and the store.
 
 **Implementing or extending this tool in Cursor:** start with [`docs/AGENT_CONTEXT.md`](docs/AGENT_CONTEXT.md) (architecture, decisions, phased history, pitfalls).
 

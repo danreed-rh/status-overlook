@@ -21,7 +21,7 @@ Automated coverage in this repo: `tests/test_contrib_templates.py` and scheduler
 ## Actions — Linux
 
 1. Install Python 3.10+, `gh`, and `acli`. Put `acli` on `PATH`.
-2. `gh auth login` and `acli jira auth login --site … --email … --token`.
+2. `gh auth login` and `acli jira auth login --web` (or token login with `--site`, `--email`, and `--token < token.txt`).
 3. `pipx install git+https://github.com/danreed-rh/status-overlook.git`
 4. `status-overlook init` (or `--non-interactive --force` on a throwaway config).
 5. `status-overlook doctor`

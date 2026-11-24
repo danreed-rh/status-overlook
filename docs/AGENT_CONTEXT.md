@@ -20,7 +20,7 @@ Use this doc when opening the **status-overlook** repo in Cursor. It summarizes 
 
 **Status Overlook** is a **personal, local-first** CLI that answers: *what Jira + GitHub work needs me right now?*
 
-- **Not** a team board, Slack bot, or write-back integration.
+- **Not** a shared multi-user board, Slack bot, or write-back integration. The optional localhost Team review page tracks a manually curated GitHub roster for this user.
 - **Agent contract:** local `digest.md` / `digest.json` (or `status-overlook show --plain`) — not the browser UI.
 - **Data plane:** `gh` + `acli` only (no direct REST SDKs in v1).
 - **Repo:** https://github.com/danreed-rh/status-overlook  
@@ -50,7 +50,9 @@ flowchart LR
   digest --> show
 ```
 
-**`status-overlook run`** = reconcile (if not skipped) → enrich/classify → save store → write digests.
+**`status-overlook run`** = stage reconcile (if not skipped) → enrich/classify → save the resulting store → write digests. Existing visible status/lifecycle changes are not persisted before enrichment succeeds.
+
+When GitHub is enabled, `run` also attempts to refresh the separate Team review cache, including when personal Jira work fails. Team errors keep the previous team result and do not fail an otherwise successful personal run. See [TEAM_REVIEW.md](TEAM_REVIEW.md) for the UX and software design; the personal agent digest does not include team PRs.
 
 | Stage | Module | Role |
 |-------|--------|------|
@@ -65,7 +67,7 @@ flowchart LR
 
 | Field | Meaning |
 |-------|---------|
-| `state_changed_at` | Last time *our* derived state changed (action, blocked, remote status, reasons). No-op runs must not bump it. |
+| `state_changed_at` | Last time a successful refresh observed a change in visible item state (lifecycle, action, remote status, or displayed cue). No-op runs and reason-only changes must not bump it. This is the basis for displayed status age. |
 | `last_read_at` | User/agent mark-read; unread = `state_changed_at` after this |
 
 ---
@@ -90,7 +92,9 @@ flowchart LR
 
 Show/digest section order: **Actionable → Pending → Blocked → Recently done**.
 
-**Cues** (display-only, not action states): `cues.cue_for(action, reasons)` maps reason codes to a next-step / blocked-reason label (`Review`, `Waiting for review`, `Blocked by issue`, …). Shown on UI pills, `show`, and `digest.md`. `digest.json` has both `cue` `{id,label,kind}` and raw `reasons`. Not stored; does not bump `state_changed_at`. Group cue comes from the primary. See [DECISIONS.md](DECISIONS.md).
+**Cues** (display-only, not action states): `cues.cue_for(action, reasons)` maps reason codes to a next-step / blocked-reason label (`Review`, `Waiting for review`, `Blocked by issue`, …). Shown on UI pills, `show`, and `digest.md`. `digest.json` has both `cue` `{id,label,kind}` and raw `reasons`. Cues are not stored, but a change in the displayed cue bumps `state_changed_at`; changes to reasons that leave the visible cue unchanged do not. Group cue comes from the primary. See [DECISIONS.md](DECISIONS.md).
+
+**Status age:** `state_changed_at` is the first time the latest visible state was observed by a successful Status Overlook update, not the exact remote transition time. Jira status, GitHub status signals (including CI), action/lifecycle, and displayed cue changes reset it. A remote change that occurs and reverts between updates is not detected and does not reset it. During `run`, discovery is provisional: lifecycle and remote status changes are staged until enrichment confirms the current fields. `digest.json` exposes the timestamp; rendered CLI, Markdown, and UI show elapsed time derived from it.
 
 ### Jira (high level)
 
@@ -127,7 +131,7 @@ Active items collapse via union-find in `digest.build_work_groups`:
 4. Section = best action (`actionable` > `pending` > `blocked`); primary = best-action member (open PR preferred); secondary `↔ …`  
 5. Recently done **not** grouped  
 
-JSON digest keeps flat items plus `group_primary_id` / `linked_ids`. Each item may include `cue` `{id, label, kind}` derived from `reasons`.
+JSON digest keeps flat items plus `group_primary_id` / `linked_ids`. Each item may include `cue` `{id, label, kind}` derived from `reasons`; `state_changed_at` is the machine-readable source for elapsed visible-state age. Grouped items retain independent timestamps.
 
 ---
 

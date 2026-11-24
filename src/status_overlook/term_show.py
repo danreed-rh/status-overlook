@@ -8,7 +8,13 @@ import sys
 from datetime import datetime, timezone
 
 from status_overlook.cues import cue_for
-from status_overlook.digest import WorkGroup, _section_groups, is_jira_epic, is_unread
+from status_overlook.digest import (
+    WorkGroup,
+    _section_groups,
+    is_jira_epic,
+    is_unread,
+    status_age_label,
+)
 from status_overlook.store import TrackStore, TrackedItem, parse_iso
 
 # ANSI
@@ -114,10 +120,13 @@ def _format_item(
     bullet = "●" if unread else " "
     key = short_key(item)
     status = item.remote_status or "—"
+    age = status_age_label(item.state_changed_at)
+    if age:
+        status = f"{status} · {age}"
     cue = cue_for(item.action, item.reasons)
     cue_label = cue.label if cue else ""
     epic_tag = "[Epic]"
-    link_bits = [f"↔ {short_key(m)}" for m in linked]
+    link_bits = [f"↔ {short_key(peer)}" for peer in linked]
     link_note = "  ".join(link_bits)
 
     # Line 1: "● KEY  [Epic]  ↔ #n  status  Cue"
@@ -157,12 +166,19 @@ def _format_item(
     summary = truncate(item.summary or "", max(8, width - 2))
     lines.append(f"  {summary}" if summary else "  —")
 
+    for peer in linked:
+        peer_status = peer.remote_status or "—"
+        peer_age = status_age_label(peer.state_changed_at)
+        age_note = f" · {peer_age}" if peer_age else ""
+        peer_line = f"  ↔ {short_key(peer)}  {peer_status}{age_note}"
+        if verbose and peer.url:
+            peer_line = f"{peer_line}  {peer.url}"
+        lines.append(_paint(f"  {truncate(peer_line.strip(), max(8, width - 2))}", _DIM, color=color))
+
     if verbose:
         bits: list[str] = []
         if item.reasons:
             bits.append(", ".join(item.reasons))
-        if item.state_changed_at:
-            bits.append(relative_changed(item.state_changed_at))
         detail = " · ".join(bits) if bits else ""
         if detail:
             lines.append(_paint(f"  {truncate(detail, max(8, width - 2))}", _DIM, color=color))
@@ -170,12 +186,6 @@ def _format_item(
         if item.url:
             meta = f"{meta}  {item.url}"
         lines.append(_paint(f"  {truncate(meta, max(8, width - 2))}", _DIM, color=color))
-        for peer in linked:
-            peer_status = peer.remote_status or "—"
-            peer_line = f"  ↔ {short_key(peer)}  {peer_status}"
-            if peer.url:
-                peer_line = f"{peer_line}  {peer.url}"
-            lines.append(_paint(f"  {truncate(peer_line.strip(), max(8, width - 2))}", _DIM, color=color))
     return lines
 
 

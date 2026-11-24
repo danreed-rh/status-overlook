@@ -26,7 +26,132 @@ def test_reconcile_adds_and_finishes():
     assert "github-pr:org/repo#3" in store.items
     assert "jira:NEW-2" in stats.added
     assert store.items["jira:OLD-1"].lifecycle == "done"
+    assert store.items["jira:OLD-1"].state_changed_at == "2026-08-07T12:00:00Z"
     assert "jira:OLD-1" in stats.finished
+
+
+def test_reconcile_preserves_last_enriched_state_until_enrichment():
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    item = TrackedItem(
+        id="github-pr:org/repo#3",
+        source="github_pr",
+        key="org/repo#3",
+        lifecycle="done",
+        action="done",
+        remote_status="merged",
+        state_changed_at="2026-08-01T12:00:00Z",
+        state_fingerprint="visible-v2:0123456789abcdef",
+        finished_at="2026-08-01T12:00:00Z",
+    )
+    store = TrackStore(items={item.id: item})
+    candidates = [
+        Candidate(
+            source="github_pr",
+            key="org/repo#3",
+            summary="pr",
+            remote_status="open",
+        )
+    ]
+
+    store, stats = reconcile(store, candidates, now=now, defer_lifecycle=True)
+
+    refreshed = store.items[item.id]
+    assert refreshed.lifecycle == "done"
+    assert refreshed.action == "done"
+    assert refreshed.remote_status == "merged"
+    assert refreshed.state_changed_at == "2026-08-01T12:00:00Z"
+    assert refreshed.finished_at == "2026-08-01T12:00:00Z"
+    assert item.id in stats.refreshed
+
+
+def test_reconcile_can_defer_finishing_missing_items_to_enrichment():
+    item = TrackedItem(
+        id="jira:KEEP-1",
+        source="jira",
+        key="KEEP-1",
+        lifecycle="active",
+        action="actionable",
+        remote_status="In Progress",
+        state_changed_at="2026-08-01T12:00:00Z",
+    )
+    store = TrackStore(items={item.id: item})
+
+    store, stats = reconcile(store, [], defer_lifecycle=True)
+
+    assert store.items[item.id].lifecycle == "active"
+    assert store.items[item.id].state_changed_at == "2026-08-01T12:00:00Z"
+    assert stats.finished == []
+
+
+def test_reconcile_reactivates_done_item_when_lifecycle_is_not_deferred():
+    item = TrackedItem(
+        id="jira:RETURN-1",
+        source="jira",
+        key="RETURN-1",
+        lifecycle="done",
+        action="actionable",
+        remote_status="In Progress",
+        state_changed_at="2026-08-01T12:00:00Z",
+    )
+    store = TrackStore(items={item.id: item})
+
+    store, _ = reconcile(
+        store,
+        [Candidate(source="jira", key="RETURN-1", remote_status="In Progress")],
+        now=datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc),
+    )
+
+    assert store.items[item.id].lifecycle == "active"
+    assert store.items[item.id].finished_at is None
+    assert store.items[item.id].state_changed_at == "2026-08-10T12:00:00Z"
+
+
+def test_deferred_reconcile_does_not_prune_rediscovered_done_item():
+    now = datetime(2026, 8, 20, 12, 0, tzinfo=timezone.utc)
+    item = TrackedItem(
+        id="jira:REOPEN-1",
+        source="jira",
+        key="REOPEN-1",
+        lifecycle="done",
+        action="done",
+        finished_at="2026-08-01T00:00:00Z",
+    )
+    store = TrackStore(items={item.id: item})
+
+    store, stats = reconcile(
+        store,
+        [Candidate(source="jira", key="REOPEN-1", remote_status="In Progress")],
+        now=now,
+        defer_lifecycle=True,
+        retention_days=7,
+    )
+
+    assert item.id in store.items
+    assert stats.pruned == []
+
+
+def test_deferred_reconcile_still_prunes_old_ignored_items():
+    now = datetime(2026, 8, 20, 12, 0, tzinfo=timezone.utc)
+    item = TrackedItem(
+        id="jira:IGNORE-1",
+        source="jira",
+        key="IGNORE-1",
+        lifecycle="done",
+        action="ignore",
+        finished_at="2026-08-01T00:00:00Z",
+    )
+    store = TrackStore(items={item.id: item})
+
+    store, stats = reconcile(
+        store,
+        [Candidate(source="jira", key="IGNORE-1")],
+        now=now,
+        defer_lifecycle=True,
+        retention_days=7,
+    )
+
+    assert item.id not in store.items
+    assert stats.pruned == [item.id]
 
 
 def test_reconcile_keeps_pins():

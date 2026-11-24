@@ -54,8 +54,7 @@ def acli_install_hint(*, platform: str | None = None) -> str:
         return (
             base
             + "\n  Unpack the binary into ~/.local/bin (or another directory on PATH). "
-            "Jira login: acli jira auth login --site YOUR.atlassian.net "
-            "--email YOU@example.com --token"
+            "Jira login: acli jira auth login --web"
         )
     return (
         base
@@ -111,11 +110,21 @@ def check_acli() -> CheckResult:
     )
     if probe.returncode != 0:
         err = (probe.stderr or probe.stdout or "acli jira call failed").strip()[:200]
-        hint = (
-            "Authenticate Jira, e.g.\n"
-            "  acli jira auth login --site YOUR.atlassian.net --email YOU@example.com --token"
+        auth = _run(["acli", "jira", "auth", "status"])
+        if auth.returncode != 0:
+            auth_err = (auth.stderr or auth.stdout or "not authenticated").strip()[:200]
+            return CheckResult(
+                name="acli",
+                ok=False,
+                detail=f"Jira authentication failed: {auth_err}",
+                hint="Run: acli jira auth login --web",
+            )
+        return CheckResult(
+            name="acli",
+            ok=False,
+            detail=f"Jira search failed: {err}",
+            hint="Check Jira access or the JQL query; acli jira auth status is ok",
         )
-        return CheckResult(name="acli", ok=False, detail=err, hint=hint)
     return CheckResult(name="acli", ok=True, detail="jira search ok")
 
 
@@ -207,11 +216,13 @@ def run_doctor(
     if require_gh:
         results.append(check_gh())
     if require_acli:
-        results.append(check_acli())
+        acli = check_acli()
+        results.append(acli)
         results.append(check_jira_config(cfg))
-        qa = check_qa_field(cfg)
-        if qa is not None:
-            results.append(qa)
+        if acli.ok:
+            qa = check_qa_field(cfg)
+            if qa is not None:
+                results.append(qa)
     return results
 
 

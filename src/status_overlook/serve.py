@@ -18,9 +18,11 @@ from urllib.parse import parse_qs, urlparse
 from status_overlook.config import load_config
 from status_overlook.digest import _iso_now, build_ui_digest, mark_read, write_digests
 from status_overlook.store import load_store, save_store
+from status_overlook.team import team_payload, update_member
 from status_overlook.working_hours import is_within_working_hours, should_skip_working_hours
 
 _WEB_DIR = Path(__file__).resolve().parent / "web"
+_HEADER_MARKER = "<!-- GLOBAL_HEADER -->"
 
 # Set by run_serve; Refresh/auto-run honor --ignore-working-hours.
 _ignore_working_hours = False
@@ -43,6 +45,44 @@ def _set_run_state(**kwargs: Any) -> None:
     _run_state.update(kwargs)
 
 
+def _run_failure_message(output: str, code: int) -> str:
+    """Show the first actionable failure instead of the last line of mixed logs."""
+    lines = output.splitlines()
+    for index, line in enumerate(lines):
+        if ": FAIL — " not in line:
+            continue
+        detail = line.strip()
+        hint = lines[index + 1].strip() if index + 1 < len(lines) else ""
+        if hint.startswith("→ "):
+            return f"{detail} · {hint[2:]}"
+        return detail
+    for line in lines:
+        if line.startswith(("Provider error:", "Enrich error:", "Track store empty")):
+            return line
+    return f"run exited {code}"
+
+
+def _reload_pipeline_modules():
+    """Reload changed pipeline dependencies in dependency order for UI Refresh."""
+    import importlib
+
+    import status_overlook.classify_jira as classify_jira_mod
+    import status_overlook.cues as cues_mod
+    import status_overlook.enrich as enrich_mod
+    import status_overlook.run as run_mod
+    import status_overlook.state as state_mod
+
+    for module in (
+        classify_jira_mod,
+        cues_mod,
+        state_mod,
+        enrich_mod,
+        run_mod,
+    ):
+        importlib.reload(module)
+    return run_mod
+
+
 def _run_pipeline_bg(
     *,
     skip_github: bool = False,
@@ -59,17 +99,7 @@ def _run_pipeline_bg(
         _set_run_state(phase="running pipeline", log_tail="")
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
             # Reload so UI Refresh picks up enrich.py without a serve restart.
-            import importlib
-
-            import status_overlook.classify_jira as classify_jira_mod
-            import status_overlook.cues as cues_mod
-            import status_overlook.enrich as enrich_mod
-            import status_overlook.run as run_mod
-
-            importlib.reload(classify_jira_mod)
-            importlib.reload(cues_mod)
-            importlib.reload(enrich_mod)
-            run_mod = importlib.reload(run_mod)
+            run_mod = _reload_pipeline_modules()
             code = run_mod.run_pipeline(
                 skip_github=skip_github,
                 skip_jira=skip_jira,
@@ -80,7 +110,7 @@ def _run_pipeline_bg(
         _set_run_state(
             last_ok=code == 0,
             last_code=code,
-            last_error=None if code == 0 else f"run exited {code}",
+            last_error=None if code == 0 else _run_failure_message(text, code),
             log_tail=text[-1200:] if text else "",
             phase="done" if code == 0 else "failed",
         )
@@ -148,6 +178,19 @@ class OverlookHandler(BaseHTTPRequestHandler):
 
         if path == "/api/status":
             self._send_json(200, dict(_run_state))
+            return
+
+        if path == "/api/team":
+            try:
+                payload = team_payload()
+            except (ValueError, OSError, KeyError) as exc:
+                self._send_json(500, {"error": f"Could not read team data: {exc}"})
+                return
+            self._send_json(200, payload)
+            return
+
+        if path in ("/team", "/team/"):
+            self._serve_file(_WEB_DIR / "team.html")
             return
 
         if path in ("/", "/index.html"):
@@ -247,6 +290,21 @@ class OverlookHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "marked": n})
             return
 
+        if path == "/api/team/members":
+            body = self._read_json()
+            cfg, _ = load_config()
+            try:
+                members = update_member(
+                    body.get("login") if isinstance(body.get("login"), str) else "",
+                    body.get("action") if isinstance(body.get("action"), str) else "",
+                    self_login=cfg.github_login,
+                )
+            except ValueError as exc:
+                self._send_json(400, {"ok": False, "error": str(exc)})
+                return
+            self._send_json(200, {"ok": True, "members": members})
+            return
+
         self._send_json(404, {"error": "not found"})
 
     def _serve_file(self, path: Path) -> None:
@@ -259,7 +317,18 @@ class OverlookHandler(BaseHTTPRequestHandler):
         if not resolved.is_file():
             self._send_json(404, {"error": "not found"})
             return
-        data = resolved.read_bytes()
+        if resolved.name in {"index.html", "team.html"}:
+            html = resolved.read_text(encoding="utf-8")
+            header = (_WEB_DIR / "header.html").read_text(encoding="utf-8")
+            personal = resolved.name == "index.html"
+            header = header.replace(
+                "{{PERSONAL_CURRENT}}", 'aria-current="page"' if personal else ""
+            ).replace(
+                "{{TEAM_CURRENT}}", 'aria-current="page"' if not personal else ""
+            )
+            data = html.replace(_HEADER_MARKER, header).encode("utf-8")
+        else:
+            data = resolved.read_bytes()
         ctype, _ = mimetypes.guess_type(str(resolved))
         if resolved.suffix == ".js":
             ctype = "application/javascript; charset=utf-8"

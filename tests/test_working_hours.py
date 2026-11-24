@@ -91,6 +91,7 @@ def test_run_pipeline_skips_off_hours(monkeypatch, capsys):
 def test_run_pipeline_force_bypasses_hours(monkeypatch):
     from status_overlook.config import AppConfig, WorkingHoursConfig
     from status_overlook.run import run_pipeline
+    from status_overlook.team import TeamQueue
 
     cfg = AppConfig(working_hours=WorkingHoursConfig(enabled=True, timezone="UTC"))
     monkeypatch.setattr("status_overlook.run.load_config", lambda: (cfg, None))
@@ -103,9 +104,119 @@ def test_run_pipeline_force_bypasses_hours(monkeypatch):
         lambda **_: (None, None, 0),
     )
     monkeypatch.setattr("status_overlook.run.load_store", lambda: type("S", (), {"items": {}})())
+    monkeypatch.setattr("status_overlook.run.refresh_team_queue", lambda **_k: TeamQueue())
 
     # force passes the guard; empty store yields exit 1 (not off-hours skip 0)
     assert run_pipeline(force=True) == 1
+
+
+def test_run_pipeline_defers_reconcile_write_until_enrichment_succeeds(monkeypatch, capsys):
+    from status_overlook.config import AppConfig
+    from status_overlook.run import run_pipeline
+    from status_overlook.store import TrackStore, TrackedItem
+    from status_overlook.team import TeamQueue
+
+    cfg = AppConfig()
+    staged_store = TrackStore(
+        items={
+            "jira:STAGE-1": TrackedItem(
+                id="jira:STAGE-1",
+                source="jira",
+                key="STAGE-1",
+                lifecycle="active",
+            )
+        }
+    )
+    calls = []
+    saves = []
+    team_calls = []
+
+    monkeypatch.setattr("status_overlook.run.load_config", lambda: (cfg, None))
+    monkeypatch.setattr("status_overlook.run.should_skip_working_hours", lambda *_a, **_k: False)
+
+    def staged_reconcile(**kwargs):
+        calls.append(kwargs)
+        return staged_store, None, 0
+
+    def failed_enrichment(_store, _cfg):
+        raise RuntimeError("enrichment unavailable")
+
+    monkeypatch.setattr("status_overlook.run.run_reconcile", staged_reconcile)
+    monkeypatch.setattr("status_overlook.run.enrich_and_classify_store", failed_enrichment)
+    monkeypatch.setattr("status_overlook.run.save_store", lambda store: saves.append(store))
+    monkeypatch.setattr(
+        "status_overlook.run.refresh_team_queue",
+        lambda **kwargs: team_calls.append(kwargs) or TeamQueue(),
+    )
+
+    assert run_pipeline() == 1
+    assert calls == [
+        {
+            "skip_github": False,
+            "skip_jira": False,
+            "persist": False,
+            "defer_lifecycle": True,
+        }
+    ]
+    assert saves == []
+    assert team_calls == [{"limit": 50, "self_login": ""}]
+    assert "Enrich error: enrichment unavailable" in capsys.readouterr().out
+
+
+def test_team_refresh_error_keeps_personal_run_successful(monkeypatch, capsys, tmp_path):
+    from status_overlook.config import AppConfig
+    from status_overlook.run import run_pipeline
+    from status_overlook.store import TrackStore, TrackedItem
+    from status_overlook.team import TeamQueue
+
+    store = TrackStore(items={
+        "jira:X-1": TrackedItem(id="jira:X-1", source="jira", key="X-1", action="actionable")
+    })
+    monkeypatch.setattr("status_overlook.run.load_config", lambda: (AppConfig(github_login="me"), None))
+    monkeypatch.setattr("status_overlook.run.should_skip_working_hours", lambda *_a, **_k: False)
+    monkeypatch.setattr("status_overlook.run.run_reconcile", lambda **_k: (store, None, 0))
+    monkeypatch.setattr("status_overlook.run.enrich_and_classify_store", lambda *_a: (1, 0))
+    monkeypatch.setattr("status_overlook.run.save_store", lambda _store: tmp_path / "store.json")
+    monkeypatch.setattr("status_overlook.run.write_digests", lambda _store: (tmp_path / "digest.md", tmp_path / "digest.json"))
+    calls = []
+
+    def refresh_team_queue(**kwargs):
+        calls.append(kwargs)
+        return TeamQueue(last_error="GitHub unavailable")
+
+    monkeypatch.setattr("status_overlook.run.refresh_team_queue", refresh_team_queue)
+    assert run_pipeline() == 0
+    assert calls == [{"limit": 50, "self_login": "me"}]
+    assert "Team queue refresh failed" in capsys.readouterr().out
+
+    calls.clear()
+    assert run_pipeline(skip_github=True) == 0
+    assert calls == []
+
+
+def test_jira_reconcile_failure_does_not_block_team_update(monkeypatch):
+    from status_overlook.config import AppConfig
+    from status_overlook.run import run_pipeline
+    from status_overlook.store import TrackStore
+    from status_overlook.team import TeamQueue
+
+    monkeypatch.setattr(
+        "status_overlook.run.load_config",
+        lambda: (AppConfig(github_login="me"), None),
+    )
+    monkeypatch.setattr("status_overlook.run.should_skip_working_hours", lambda *_a, **_k: False)
+    monkeypatch.setattr(
+        "status_overlook.run.run_reconcile", lambda **_k: (TrackStore(), None, 1)
+    )
+    calls = []
+
+    def refresh_team_queue(**kwargs):
+        calls.append(kwargs)
+        return TeamQueue(updated_at="2026-11-23T10:00:00Z")
+
+    monkeypatch.setattr("status_overlook.run.refresh_team_queue", refresh_team_queue)
+    assert run_pipeline() == 1
+    assert calls == [{"limit": 50, "self_login": "me"}]
 
 
 def test_working_hours_config_roundtrip(tmp_path):

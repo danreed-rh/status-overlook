@@ -90,12 +90,14 @@ Reading digests (`show`, `/api/digest`) is always local — not gated.
 | `gh` | GitHub |
 | `acli` | Jira |
 
+If Refresh reports `Jira authentication failed`, run `acli jira auth status` and follow the login command in the UI. Some acli versions report an expired session as `failed to parse JQL` during search; the doctor checks authentication before attributing that error to a QA field.
+
 ## Timestamps (digest)
 
 | Field | Meaning |
 |-------|---------|
 | `remote_updated_at` | Upstream updated time |
-| `state_changed_at` | Last change to our derived state (not bumped on no-op runs) |
+| `state_changed_at` | Last observed change in visible lifecycle, action, remote status, or displayed cue. Reason-only changes and no-op runs do not bump it. Renderers derive elapsed status age from this timestamp; it is not a remote history timestamp. |
 | `last_read_at` | Last mark-read by you or an agent |
 
 ## Jira blocked detection
@@ -145,7 +147,7 @@ Recently done is not grouped. JSON digest keeps all items and adds `group_primar
 
 ## Roadmap (not in this release)
 
-- **Deferred:** team multi-user board, ROSA/cluster hosting
+- **Deferred:** shared team multi-user board, ROSA/cluster hosting
 
 ## Local UI (`serve`)
 
@@ -160,6 +162,8 @@ Recently done is not grouped. JSON digest keeps all items and adds `group_primar
 - OS scheduler updates digests on disk but does not refresh an open tab by itself.
 - Mark all read
 - Cue pills (next-step labels). Section headers name the bucket (Actionable / Pending / …).
+- PR status labels in the UI translate raw tokens (for example, `open+ci_fail` → `Open · CI failing`). My Work shows linked keys together and one status age: the open PR’s current observed status age when present, otherwise the group primary’s. Each member retains its own `state_changed_at` in the UI payload and `digest.json`.
+- The **Team review** tab (`/team`) is a separate, read-only view of team PRs with its own locally editable roster and cached results. It polls the local cache every minute to pick up scheduler updates. See [TEAM_REVIEW.md](TEAM_REVIEW.md).
 
 Restart `serve` after Python or static-file changes. If the port is in use, the CLI prints that and suggests `--port`.
 

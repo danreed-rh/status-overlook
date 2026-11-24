@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from status_overlook.config import load_config
+from status_overlook.config import AppConfig, load_config
 from status_overlook.digest import write_digests
 from status_overlook.enrich import enrich_and_classify_store
 from status_overlook.reconcile import run_reconcile
 from status_overlook.store import load_store, save_store
+from status_overlook.team import refresh_team_queue
 from status_overlook.working_hours import should_skip_working_hours
 
 
@@ -25,12 +26,35 @@ def run_pipeline(
         )
         return 0
 
+    personal_code = _run_personal_pipeline(
+        cfg,
+        skip_github=skip_github,
+        skip_jira=skip_jira,
+        skip_reconcile=skip_reconcile,
+    )
+    if not skip_github:
+        _refresh_team(cfg)
+    return personal_code
+
+
+def _run_personal_pipeline(
+    cfg: AppConfig, *, skip_github: bool, skip_jira: bool, skip_reconcile: bool
+) -> int:
+    """Keep personal digests independent of the GitHub-only team queue."""
+
+    store = None
     if not skip_reconcile:
-        _, _, code = run_reconcile(skip_github=skip_github, skip_jira=skip_jira)
+        store, _, code = run_reconcile(
+            skip_github=skip_github,
+            skip_jira=skip_jira,
+            persist=False,
+            defer_lifecycle=True,
+        )
         if code != 0:
             return code
 
-    store = load_store()
+    if store is None:
+        store = load_store()
     if not store.items:
         print("Track store empty — nothing to enrich. Run reconcile first.")
         return 1
@@ -53,3 +77,16 @@ def run_pipeline(
     counts = Counter(i.action or "unset" for i in store.items.values() if i.lifecycle == "active")
     print("Active by action:", dict(counts))
     return 0
+
+
+def _refresh_team(cfg: AppConfig) -> None:
+    try:
+        team_queue = refresh_team_queue(
+            limit=cfg.search_limit, self_login=cfg.github_login
+        )
+        if team_queue.last_error:
+            print(f"Team queue refresh failed (previous results kept): {team_queue.last_error}")
+        else:
+            print(f"Team queue: {len(team_queue.items)} PR(s)")
+    except (RuntimeError, ValueError, OSError) as exc:
+        print(f"Team queue refresh failed: {exc}")

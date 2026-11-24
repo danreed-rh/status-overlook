@@ -1,4 +1,12 @@
-from status_overlook.digest import build_digest_markdown, is_unread, mark_read
+from datetime import datetime, timezone
+
+from status_overlook.digest import (
+    build_digest_json,
+    build_digest_markdown,
+    is_unread,
+    mark_read,
+    status_age_label,
+)
 from status_overlook.enrich import state_fingerprint
 from status_overlook.store import TrackStore, TrackedItem
 
@@ -29,6 +37,49 @@ def test_fingerprint_changes_on_action():
         action="actionable", lifecycle="active", remote_status="open", blocked=False, reasons=()
     )
     assert a != b
+
+
+def test_fingerprint_ignores_reason_changes_when_visible_cue_is_same():
+    from status_overlook.enrich import state_fingerprint
+
+    a = state_fingerprint(
+        action="actionable",
+        lifecycle="active",
+        remote_status="open",
+        blocked=False,
+        reasons=("jira_active_assignee",),
+    )
+    b = state_fingerprint(
+        action="actionable",
+        lifecycle="active",
+        remote_status="open",
+        blocked=False,
+        reasons=("github_issue_open",),
+    )
+    assert a == b
+
+
+def test_fingerprint_changes_when_displayed_cue_changes():
+    from status_overlook.enrich import state_fingerprint
+
+    base = dict(action="actionable", lifecycle="active", remote_status="open")
+    review = state_fingerprint(**base, reasons=("github_assignee_to_review",))
+    fix_ci = state_fingerprint(**base, reasons=("github_ci_failed",))
+    assert review != fix_ci
+
+
+def test_status_age_label_uses_whole_days_and_clamps_future():
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
+    assert status_age_label("2026-08-10T11:59:30Z", now=now) == "<1d"
+    assert status_age_label("2026-08-10T11:40:00Z", now=now) == "<1d"
+    assert status_age_label("2026-08-09T12:00:01Z", now=now) == "<1d"
+    assert status_age_label("2026-08-09T12:00:00Z", now=now) == "1d"
+    assert status_age_label("2026-08-08T12:00:01Z", now=now) == "1d"
+    assert status_age_label("2026-08-08T12:00:00Z", now=now) == "2d"
+    assert status_age_label("2026-08-05T12:00:00Z", now=now) == "5d"
+    assert status_age_label("2026-08-11T12:00:00Z", now=now) == "<1d"
+    assert status_age_label("not-a-date", now=now) == ""
+    assert status_age_label("", now=now) == ""
 
 
 def test_unread_and_mark_read():
@@ -288,3 +339,39 @@ def test_digest_json_includes_cue_and_reasons():
         "label": "Develop",
         "kind": "actionable",
     }
+
+
+def test_status_age_rendered_for_each_member_of_group():
+    store = TrackStore(
+        items={
+            "jira:PAIR-1": TrackedItem(
+                id="jira:PAIR-1",
+                source="jira",
+                key="PAIR-1",
+                lifecycle="active",
+                action="pending",
+                summary="paired",
+                remote_status="In Review",
+                state_changed_at="2026-08-05T12:00:00Z",
+                reasons=["jira_in_review"],
+                pr_link="https://github.com/org/repo/pull/4",
+            ),
+            "github-pr:org/repo#4": TrackedItem(
+                id="github-pr:org/repo#4",
+                source="github_pr",
+                key="org/repo#4",
+                lifecycle="active",
+                action="actionable",
+                summary="fix(PAIR-1): implement",
+                remote_status="open+ci_fail",
+                state_changed_at="2026-08-10T11:00:00Z",
+            ),
+        }
+    )
+    payload = build_digest_json(store)
+    rows = {row["key"]: row for row in payload["items"]}
+    assert rows["PAIR-1"]["state_changed_at"] == "2026-08-05T12:00:00Z"
+    assert rows["org/repo#4"]["state_changed_at"] == "2026-08-10T11:00:00Z"
+    markdown = build_digest_markdown(store)
+    assert "[open+ci_fail · " in markdown
+    assert "↔ PAIR-1 [In Review · " in markdown
